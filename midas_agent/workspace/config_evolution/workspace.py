@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import uuid
 from typing import Callable
 
@@ -62,14 +63,31 @@ class ConfigEvolutionWorkspace(Workspace):
         )
         os.makedirs(patches_dir, exist_ok=True)
 
-        patch_content = ""
-        if self._last_result is not None and self._last_result.patch:
-            patch_content = self._last_result.patch
+        patch_content = self._generate_patch()
 
         episode_id = uuid.uuid4().hex[:8]
         patch_path = os.path.join(patches_dir, f"{episode_id}.patch")
         with open(patch_path, "w") as f:
             f.write(patch_content)
+
+    def _generate_patch(self) -> str:
+        """Get patch content from git diff if work_dir is set, else from DAG output."""
+        if self.work_dir and os.path.isdir(os.path.join(self.work_dir, ".git")):
+            try:
+                result = subprocess.run(
+                    ["git", "diff"],
+                    cwd=self.work_dir,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+                return result.stdout
+            except Exception:
+                pass
+        # Fallback: use DAG execution output.
+        if self._last_result is not None and self._last_result.patch:
+            return self._last_result.patch
+        return ""
 
     def post_episode(self, eval_results: dict, evicted_ids: list[str]) -> dict | None:
         self.calls.append(("post_episode", {"eval_results": eval_results, "evicted_ids": evicted_ids}))
