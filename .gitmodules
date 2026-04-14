@@ -1,0 +1,3 @@
+[submodule "midas-agent-design-book"]
+	path = midas-agent-design-book
+	url = https://github.com/Midas-Agent-Dev/midas-agent-design-book.git
