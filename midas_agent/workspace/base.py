@@ -16,6 +16,7 @@ class Workspace(ABC):
         self.workspace_id = workspace_id
         self.calls: list[tuple[str, dict]] = []
         self.budget_received: int = 0
+        self.work_dir: str = ""
 
     @abstractmethod
     def receive_budget(self, amount: int) -> None:

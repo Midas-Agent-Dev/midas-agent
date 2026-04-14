@@ -7,5 +7,6 @@ class Issue:
     issue_id: str
     repo: str
     description: str
+    base_commit: str = ""
     fail_to_pass: list[str] = field(default_factory=list)
     pass_to_pass: list[str] = field(default_factory=list)

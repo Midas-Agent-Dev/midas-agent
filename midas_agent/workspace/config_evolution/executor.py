@@ -28,6 +28,13 @@ class DAGExecutor:
     def __init__(self, action_registry: ActionRegistry) -> None:
         self._action_registry = action_registry
 
+    def set_work_dir(self, work_dir: str) -> None:
+        """Propagate working directory to all actions that support it."""
+        for name in list(self._action_registry._actions):
+            action = self._action_registry._actions[name]
+            if hasattr(action, "cwd"):
+                action.cwd = work_dir
+
     def execute(
         self,
         config: WorkflowConfig,

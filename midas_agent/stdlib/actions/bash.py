@@ -5,6 +5,9 @@ from midas_agent.stdlib.action import Action
 
 
 class BashAction(Action):
+    def __init__(self, cwd: str | None = None) -> None:
+        self.cwd = cwd
+
     @property
     def name(self) -> str:
         return "bash"
@@ -30,6 +33,7 @@ class BashAction(Action):
                 capture_output=True,
                 text=True,
                 timeout=timeout,
+                cwd=self.cwd or None,
             )
             output = result.stdout
             if result.returncode != 0 and result.stderr:

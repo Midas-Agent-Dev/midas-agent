@@ -3,6 +3,9 @@ from midas_agent.stdlib.action import Action
 
 
 class SearchCodeAction(Action):
+    def __init__(self, cwd: str | None = None) -> None:
+        self.cwd = cwd
+
     @property
     def name(self) -> str:
         return "search_code"
@@ -26,6 +29,9 @@ class SearchCodeAction(Action):
 
 
 class FindFilesAction(Action):
+    def __init__(self, cwd: str | None = None) -> None:
+        self.cwd = cwd
+
     @property
     def name(self) -> str:
         return "find_files"

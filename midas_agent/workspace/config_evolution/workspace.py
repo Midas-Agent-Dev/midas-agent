@@ -42,6 +42,8 @@ class ConfigEvolutionWorkspace(Workspace):
 
     def execute(self, issue: Issue) -> None:
         self.calls.append(("execute", {"issue_id": issue.issue_id}))
+        if self.work_dir:
+            self._dag_executor.set_work_dir(self.work_dir)
         self._last_result = self._dag_executor.execute(
             self._workflow_config, issue, self._call_llm,
         )

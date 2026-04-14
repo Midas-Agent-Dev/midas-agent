@@ -3,8 +3,9 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from midas_agent.main_training import run_training
+from midas_agent.main_training import run_training, collect_patches, load_swe_bench
 from midas_agent.config import MidasConfig
+from midas_agent.types import Issue
 
 
 @pytest.mark.unit
@@ -21,6 +22,16 @@ class TestRunTraining:
         defaults.update(kwargs)
         return MidasConfig(**defaults)
 
+    def _make_issues(self, count: int = 2) -> list[Issue]:
+        return [
+            Issue(
+                issue_id=f"test-issue-{i}",
+                repo="",
+                description=f"Fix bug {i}",
+            )
+            for i in range(count)
+        ]
+
     def test_run_training_callable(self):
         """run_training is a callable function."""
         assert callable(run_training)
@@ -28,9 +39,7 @@ class TestRunTraining:
     def test_run_training_accepts_config(self):
         """run_training accepts a MidasConfig argument and completes without error."""
         config = self._make_config()
-
-        # Should complete without raising.
-        result = run_training(config)
+        result = run_training(config, issues=[])
         assert result is None
 
     def test_run_training_creates_scheduler(self):
@@ -42,40 +51,84 @@ class TestRunTraining:
             mock_instance.get_workspaces.return_value = []
             mock_instance.create_workspaces.return_value = None
             mock_instance.allocate_budgets.return_value = None
+            mock_instance.evaluate_and_select.return_value = ([], [], {})
+            mock_instance.replace_evicted.return_value = None
 
-            run_training(config)
+            run_training(config, issues=self._make_issues(1))
 
             MockScheduler.assert_called_once()
 
     def test_run_training_episode_loop(self):
-        """run_training must execute the 6-phase episode loop.
-
-        The loop phases are:
-        1. Allocate budgets
-        2. Create/get workspaces
-        3. Execute agent work
-        4. Collect patches
-        5. Evaluate and select
-        6. Replace evicted workspaces
-        """
+        """run_training runs one episode per issue."""
         config = self._make_config()
+        issues = self._make_issues(2)
 
         with patch("midas_agent.main_training.Scheduler") as MockScheduler:
             mock_instance = MockScheduler.return_value
             mock_instance.get_workspaces.return_value = []
             mock_instance.create_workspaces.return_value = None
             mock_instance.allocate_budgets.return_value = None
+            mock_instance.evaluate_and_select.return_value = ([], [], {})
+            mock_instance.replace_evicted.return_value = None
 
-            run_training(config)
+            run_training(config, issues=issues)
 
-            # Verify the core episode phases were invoked.
-            mock_instance.create_workspaces.assert_called()
-            mock_instance.allocate_budgets.assert_called()
+            mock_instance.create_workspaces.assert_called_once()
+            assert mock_instance.allocate_budgets.call_count == 2
 
     def test_run_training_returns_none(self):
         """run_training should return None after completing all episodes."""
         config = self._make_config()
-
-        result = run_training(config)
-
+        result = run_training(config, issues=[])
         assert result is None
+
+    def test_run_training_empty_issues_no_episodes(self):
+        """With no issues, no episodes are executed."""
+        config = self._make_config()
+
+        with patch("midas_agent.main_training.Scheduler") as MockScheduler:
+            mock_instance = MockScheduler.return_value
+            mock_instance.create_workspaces.return_value = None
+
+            run_training(config, issues=[])
+
+            mock_instance.create_workspaces.assert_called_once()
+            mock_instance.allocate_budgets.assert_not_called()
+
+    def test_run_training_full_episode_with_real_components(self):
+        """Integration-style: run one episode with real (stub) components."""
+        config = self._make_config(workspace_count=2)
+        issues = self._make_issues(1)
+
+        # Should complete without error using the stub LLM.
+        run_training(config, issues=issues)
+
+
+@pytest.mark.unit
+class TestCollectPatches:
+    def test_collect_empty_dir(self, tmp_path):
+        ws = MagicMock()
+        ws.workspace_id = "ws-0"
+        patches = collect_patches([ws], str(tmp_path))
+        assert patches == {"ws-0": ""}
+
+    def test_collect_existing_patch(self, tmp_path):
+        ws_dir = tmp_path / "ws-0"
+        ws_dir.mkdir()
+        (ws_dir / "ep1.patch").write_text("diff --git a/foo")
+
+        ws = MagicMock()
+        ws.workspace_id = "ws-0"
+        patches = collect_patches([ws], str(tmp_path))
+        assert patches["ws-0"] == "diff --git a/foo"
+
+    def test_collect_latest_patch(self, tmp_path):
+        ws_dir = tmp_path / "ws-0"
+        ws_dir.mkdir()
+        (ws_dir / "ep1.patch").write_text("old")
+        (ws_dir / "ep2.patch").write_text("new")
+
+        ws = MagicMock()
+        ws.workspace_id = "ws-0"
+        patches = collect_patches([ws], str(tmp_path))
+        assert patches["ws-0"] == "new"
