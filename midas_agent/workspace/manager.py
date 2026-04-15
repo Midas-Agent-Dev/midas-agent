@@ -207,4 +207,5 @@ class WorkspaceManager:
             system_llm=self._system_llm_callback,
             free_agent_manager=free_agent_manager,
             skill_reviewer=skill_reviewer,
+            max_tool_output_chars=self._config.max_tool_output_chars,
         )
