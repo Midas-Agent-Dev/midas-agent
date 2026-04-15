@@ -44,11 +44,12 @@ class PlanExecuteAgent(ReactAgent):
 
         messages.append({"role": "user", "content": "\n".join(planning_parts)})
 
-        # Planning phase: call LLM once to get a plan
+        # Planning phase: call LLM once to get a plan (no tools)
         try:
             plan_request = LLMRequest(messages=messages, model="default")
             plan_response = self.call_llm(plan_request)
         except BudgetExhaustedError:
+            logger.info("  Budget exhausted during planning phase")
             return AgentResult(
                 output="",
                 iterations=iterations,
@@ -58,7 +59,8 @@ class PlanExecuteAgent(ReactAgent):
 
         iterations += 1
         plan_text = plan_response.content or ""
-        logger.info("  [Plan] %s", plan_text[:500])
+        plan_tokens = plan_response.usage.input_tokens + plan_response.usage.output_tokens
+        logger.info("  [Plan] (%d tokens) %s", plan_tokens, plan_text[:2000])
 
         # Add plan to conversation as assistant response
         messages.append({"role": "assistant", "content": plan_text})
@@ -72,6 +74,7 @@ class PlanExecuteAgent(ReactAgent):
         # Execution phase: standard ReAct loop
         while True:
             if self.max_iterations is not None and iterations >= self.max_iterations:
+                logger.info("  Hit max_iterations (%d). Stopping.", self.max_iterations)
                 return AgentResult(
                     output="",
                     iterations=iterations,
@@ -83,6 +86,7 @@ class PlanExecuteAgent(ReactAgent):
                 request = LLMRequest(messages=messages, model="default", tools=self._build_tools())
                 response = self.call_llm(request)
             except BudgetExhaustedError:
+                logger.info("  Budget exhausted at iter %d", iterations + 1)
                 return AgentResult(
                     output="",
                     iterations=iterations,
@@ -91,6 +95,7 @@ class PlanExecuteAgent(ReactAgent):
                 )
 
             iterations += 1
+            resp_tokens = response.usage.input_tokens + response.usage.output_tokens
 
             if response.tool_calls:
                 import json as _json
@@ -112,7 +117,15 @@ class PlanExecuteAgent(ReactAgent):
 
                 for tool_call in response.tool_calls:
                     action = self._actions_by_name[tool_call.name]
+                    logger.info(
+                        "  [iter %d] %s(%s) (%d tokens)",
+                        iterations,
+                        tool_call.name,
+                        ", ".join(f"{k}={repr(v)[:80]}" for k, v in tool_call.arguments.items()),
+                        resp_tokens,
+                    )
                     result = action.execute(**tool_call.arguments)
+                    logger.info("    → %s", result[:300] if result else "(empty)")
 
                     record = ActionRecord(
                         action_name=tool_call.name,
@@ -129,6 +142,7 @@ class PlanExecuteAgent(ReactAgent):
                     })
 
                     if tool_call.name == "task_done":
+                        logger.info("  Task done at iter %d", iterations)
                         return AgentResult(
                             output=result,
                             iterations=iterations,
@@ -136,6 +150,10 @@ class PlanExecuteAgent(ReactAgent):
                             action_history=action_history,
                         )
             elif response.content:
+                logger.info(
+                    "  [iter %d] Text response (no tool call, %d tokens): %s",
+                    iterations, resp_tokens, response.content[:300],
+                )
                 return AgentResult(
                     output=response.content,
                     iterations=iterations,
@@ -143,6 +161,7 @@ class PlanExecuteAgent(ReactAgent):
                     action_history=action_history,
                 )
             else:
+                logger.info("  [iter %d] Empty response (no content, no tool calls)", iterations)
                 return AgentResult(
                     output="",
                     iterations=iterations,

@@ -55,21 +55,18 @@ class GraphEmergenceWorkspace(Workspace):
         # Build responsible agent's action set:
         # bash, read_file, edit_file, write_file, search_code, find_files,
         # task_done, delegate_task
-        bash = BashAction(cwd=self.work_dir or None)
-        search = SearchCodeAction(cwd=self.work_dir or None)
-        find = FindFilesAction(cwd=self.work_dir or None)
-
+        cwd = self.work_dir or None
         delegate = DelegateTaskAction(
             find_candidates=lambda desc: self._free_agent_manager.match(desc),
         )
 
         actions = [
-            bash,
-            ReadFileAction(),
-            EditFileAction(),
-            WriteFileAction(),
-            search,
-            find,
+            BashAction(cwd=cwd),
+            ReadFileAction(cwd=cwd),
+            EditFileAction(cwd=cwd),
+            WriteFileAction(cwd=cwd),
+            SearchCodeAction(cwd=cwd),
+            FindFilesAction(cwd=cwd),
             TaskDoneAction(),
             delegate,
         ]

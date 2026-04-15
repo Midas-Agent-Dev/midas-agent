@@ -5,6 +5,9 @@ from midas_agent.stdlib.action import Action
 
 
 class ReadFileAction(Action):
+    def __init__(self, cwd: str | None = None) -> None:
+        self.cwd = cwd
+
     @property
     def name(self) -> str:
         return "read_file"
@@ -31,8 +34,15 @@ class ReadFileAction(Action):
             "limit": {"type": "integer", "required": False},
         }
 
+    def _resolve(self, path: str) -> str:
+        if os.path.isabs(path):
+            return path
+        if self.cwd:
+            return os.path.join(self.cwd, path)
+        return path
+
     def execute(self, **kwargs) -> str:
-        file_path = kwargs["path"]
+        file_path = self._resolve(kwargs["path"])
         offset = kwargs.get("offset", 0)
         limit = kwargs.get("limit")
         try:
@@ -47,6 +57,9 @@ class ReadFileAction(Action):
 
 
 class EditFileAction(Action):
+    def __init__(self, cwd: str | None = None) -> None:
+        self.cwd = cwd
+
     @property
     def name(self) -> str:
         return "edit_file"
@@ -79,12 +92,22 @@ class EditFileAction(Action):
             "auto_indent": {"type": "boolean", "required": False, "default": True},
         }
 
+    def _resolve(self, path: str) -> str:
+        if os.path.isabs(path):
+            return path
+        if self.cwd:
+            return os.path.join(self.cwd, path)
+        return path
+
     def execute(self, **kwargs) -> str:
-        file_path = kwargs["path"]
+        file_path = self._resolve(kwargs["path"])
         return f"Edited {file_path}"
 
 
 class WriteFileAction(Action):
+    def __init__(self, cwd: str | None = None) -> None:
+        self.cwd = cwd
+
     @property
     def name(self) -> str:
         return "write_file"
@@ -108,11 +131,20 @@ class WriteFileAction(Action):
             "content": {"type": "string", "required": True},
         }
 
+    def _resolve(self, path: str) -> str:
+        if os.path.isabs(path):
+            return path
+        if self.cwd:
+            return os.path.join(self.cwd, path)
+        return path
+
     def execute(self, **kwargs) -> str:
-        file_path = kwargs["path"]
+        file_path = self._resolve(kwargs["path"])
         content = kwargs["content"]
         try:
-            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+            dir_name = os.path.dirname(file_path)
+            if dir_name:
+                os.makedirs(dir_name, exist_ok=True)
             with open(file_path, "w") as f:
                 f.write(content)
             return f"Written {len(content)} bytes to {file_path}"
