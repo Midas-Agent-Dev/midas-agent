@@ -1,4 +1,5 @@
 """File operation actions — read, edit, write."""
+import ast
 import os
 
 from midas_agent.stdlib.action import Action
@@ -135,7 +136,65 @@ class EditFileAction(Action):
         return path
 
     def execute(self, **kwargs) -> str:
-        file_path = self._resolve(kwargs["path"])
+        try:
+            file_path = self._resolve(kwargs["path"])
+        except KeyError:
+            return "Error: missing required parameter 'path'"
+
+        command = kwargs.get("command")
+        if command is None:
+            return f"Error: missing required parameter 'command' for {file_path}"
+
+        # Read existing file
+        try:
+            with open(file_path, "r") as f:
+                lines = f.readlines()
+        except FileNotFoundError:
+            return f"Error: file not found: {file_path}"
+        except Exception as e:
+            return f"Error reading file: {e}"
+
+        # Apply the edit to produce new lines
+        try:
+            if command == "replace":
+                start = kwargs["start_line"]
+                end = kwargs["end_line"]
+                new_content = kwargs.get("new_content", "")
+                new_lines = new_content.splitlines(True)
+                result_lines = lines[: start - 1] + new_lines + lines[end:]
+
+            elif command == "insert":
+                insert_line = kwargs["insert_line"]
+                new_content = kwargs.get("new_content", "")
+                new_lines = new_content.splitlines(True)
+                result_lines = lines[:insert_line] + new_lines + lines[insert_line:]
+
+            elif command == "delete":
+                start = kwargs["start_line"]
+                end = kwargs["end_line"]
+                result_lines = lines[: start - 1] + lines[end:]
+
+            else:
+                return f"Error: unknown command '{command}'"
+        except KeyError as e:
+            return f"Error: missing required parameter {e} for command '{command}'"
+
+        result_text = "".join(result_lines)
+
+        # Syntax check for Python files
+        if file_path.endswith(".py"):
+            try:
+                ast.parse(result_text)
+            except SyntaxError as e:
+                return f"Syntax error: {e}. Edit rejected; file unchanged."
+
+        # Write back
+        try:
+            with open(file_path, "w") as f:
+                f.write(result_text)
+        except Exception as e:
+            return f"Error writing file: {e}"
+
         return f"Edited {file_path}"
 
 

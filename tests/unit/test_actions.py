@@ -85,15 +85,208 @@ class TestEditFileAction:
         action = EditFileAction()
         assert action.name == "edit_file"
 
-    def test_edit_file_action_execute(self):
-        """EditFileAction.execute() returns a string result."""
-        action = EditFileAction()
+    # -- replace command --
+
+    def test_replace_modifies_file_content(self, tmp_path):
+        """replace command actually changes the file on disk."""
+        f = tmp_path / "code.py"
+        f.write_text("line1\nline2\nline3\nline4\n")
+
+        action = EditFileAction(cwd=str(tmp_path))
         result = action.execute(
-            path="/tmp/test.txt",
             command="replace",
-            start_line=1,
+            path="code.py",
+            start_line=2,
+            end_line=3,
+            new_content="replaced2\nreplaced3\n",
         )
+
+        content = f.read_text()
+        assert "replaced2" in content
+        assert "replaced3" in content
+        assert "line1" in content
+        assert "line4" in content
+        # Original lines 2-3 must be gone
+        assert "line2" not in content
+        assert "line3" not in content
+
+    def test_replace_single_line(self, tmp_path):
+        """replace a single line (start_line == end_line)."""
+        f = tmp_path / "code.py"
+        f.write_text("aaa\nbbb\nccc\n")
+
+        action = EditFileAction(cwd=str(tmp_path))
+        action.execute(
+            command="replace",
+            path="code.py",
+            start_line=2,
+            end_line=2,
+            new_content="BBB\n",
+        )
+
+        lines = f.read_text().splitlines()
+        assert lines == ["aaa", "BBB", "ccc"]
+
+    def test_replace_returns_confirmation(self, tmp_path):
+        """replace returns a message confirming the edit."""
+        f = tmp_path / "code.py"
+        f.write_text("old\n")
+
+        action = EditFileAction(cwd=str(tmp_path))
+        result = action.execute(
+            command="replace",
+            path="code.py",
+            start_line=1,
+            end_line=1,
+            new_content="new\n",
+        )
+
         assert isinstance(result, str)
+        assert "code.py" in result
+
+    # -- insert command --
+
+    def test_insert_adds_content_after_line(self, tmp_path):
+        """insert command adds new_content after insert_line."""
+        f = tmp_path / "code.py"
+        f.write_text("line1\nline2\nline3\n")
+
+        action = EditFileAction(cwd=str(tmp_path))
+        action.execute(
+            command="insert",
+            path="code.py",
+            insert_line=1,
+            new_content="inserted\n",
+        )
+
+        lines = f.read_text().splitlines()
+        assert lines[0] == "line1"
+        assert lines[1] == "inserted"
+        assert lines[2] == "line2"
+
+    def test_insert_at_end(self, tmp_path):
+        """insert after the last line appends to end of file."""
+        f = tmp_path / "code.py"
+        f.write_text("line1\nline2\n")
+
+        action = EditFileAction(cwd=str(tmp_path))
+        action.execute(
+            command="insert",
+            path="code.py",
+            insert_line=2,
+            new_content="line3\n",
+        )
+
+        lines = f.read_text().splitlines()
+        assert lines == ["line1", "line2", "line3"]
+
+    # -- delete command --
+
+    def test_delete_removes_lines(self, tmp_path):
+        """delete command removes lines from start_line to end_line."""
+        f = tmp_path / "code.py"
+        f.write_text("keep1\ndelete_me\nalso_delete\nkeep2\n")
+
+        action = EditFileAction(cwd=str(tmp_path))
+        action.execute(
+            command="delete",
+            path="code.py",
+            start_line=2,
+            end_line=3,
+        )
+
+        content = f.read_text()
+        assert "keep1" in content
+        assert "keep2" in content
+        assert "delete_me" not in content
+        assert "also_delete" not in content
+
+    # -- syntax checking --
+
+    def test_python_syntax_check_rejects_bad_edit(self, tmp_path):
+        """Editing a .py file with invalid syntax is rejected."""
+        f = tmp_path / "code.py"
+        f.write_text("x = 1\ny = 2\n")
+
+        action = EditFileAction(cwd=str(tmp_path))
+        result = action.execute(
+            command="replace",
+            path="code.py",
+            start_line=1,
+            end_line=1,
+            new_content="x = (\n",  # unclosed paren = invalid syntax
+        )
+
+        # Edit should be rejected
+        assert "syntax" in result.lower() or "error" in result.lower()
+        # Original file must be unchanged
+        assert f.read_text() == "x = 1\ny = 2\n"
+
+    def test_python_syntax_check_accepts_good_edit(self, tmp_path):
+        """Editing a .py file with valid syntax succeeds."""
+        f = tmp_path / "code.py"
+        f.write_text("x = 1\ny = 2\n")
+
+        action = EditFileAction(cwd=str(tmp_path))
+        result = action.execute(
+            command="replace",
+            path="code.py",
+            start_line=1,
+            end_line=1,
+            new_content="x = 42\n",
+        )
+
+        assert "error" not in result.lower() or "syntax" not in result.lower()
+        assert "42" in f.read_text()
+
+    def test_non_python_file_skips_syntax_check(self, tmp_path):
+        """Non-.py files are not syntax-checked."""
+        f = tmp_path / "config.txt"
+        f.write_text("old value\n")
+
+        action = EditFileAction(cwd=str(tmp_path))
+        action.execute(
+            command="replace",
+            path="config.txt",
+            start_line=1,
+            end_line=1,
+            new_content="this is not valid python (\n",
+        )
+
+        assert "this is not valid python (" in f.read_text()
+
+    # -- edge cases --
+
+    def test_edit_nonexistent_file_returns_error(self, tmp_path):
+        """Editing a file that doesn't exist returns an error, not a crash."""
+        action = EditFileAction(cwd=str(tmp_path))
+        result = action.execute(
+            command="replace",
+            path="does_not_exist.py",
+            start_line=1,
+            end_line=1,
+            new_content="x\n",
+        )
+
+        assert "error" in result.lower() or "not found" in result.lower()
+
+    def test_edit_resolves_relative_path_with_cwd(self, tmp_path):
+        """Relative paths resolve against cwd."""
+        sub = tmp_path / "src"
+        sub.mkdir()
+        f = sub / "mod.py"
+        f.write_text("old\n")
+
+        action = EditFileAction(cwd=str(tmp_path))
+        action.execute(
+            command="replace",
+            path="src/mod.py",
+            start_line=1,
+            end_line=1,
+            new_content="new\n",
+        )
+
+        assert f.read_text().strip() == "new"
 
 
 @pytest.mark.unit
@@ -105,11 +298,34 @@ class TestWriteFileAction:
         action = WriteFileAction()
         assert action.name == "write_file"
 
-    def test_write_file_action_execute(self):
-        """WriteFileAction.execute() returns a string result."""
-        action = WriteFileAction()
-        result = action.execute(path="/tmp/test.txt", content="hello")
-        assert isinstance(result, str)
+    def test_write_creates_file(self, tmp_path):
+        """write_file creates a new file with the given content."""
+        action = WriteFileAction(cwd=str(tmp_path))
+        result = action.execute(path="new_file.txt", content="hello world")
+
+        f = tmp_path / "new_file.txt"
+        assert f.exists()
+        assert f.read_text() == "hello world"
+        assert "Written" in result
+
+    def test_write_overwrites_existing(self, tmp_path):
+        """write_file overwrites an existing file completely."""
+        f = tmp_path / "existing.txt"
+        f.write_text("old content")
+
+        action = WriteFileAction(cwd=str(tmp_path))
+        action.execute(path="existing.txt", content="new content")
+
+        assert f.read_text() == "new content"
+
+    def test_write_creates_parent_dirs(self, tmp_path):
+        """write_file creates parent directories if they don't exist."""
+        action = WriteFileAction(cwd=str(tmp_path))
+        action.execute(path="deep/nested/dir/file.txt", content="nested")
+
+        f = tmp_path / "deep" / "nested" / "dir" / "file.txt"
+        assert f.exists()
+        assert f.read_text() == "nested"
 
 
 @pytest.mark.unit
@@ -121,11 +337,78 @@ class TestSearchCodeAction:
         action = SearchCodeAction()
         assert action.name == "search_code"
 
-    def test_search_code_action_execute(self):
-        """SearchCodeAction.execute() returns a string result."""
-        action = SearchCodeAction()
-        result = action.execute(pattern="def test_")
-        assert isinstance(result, str)
+    def test_search_finds_matching_content(self, tmp_path):
+        """search_code returns file paths and matching lines for a pattern."""
+        (tmp_path / "a.py").write_text("def hello():\n    pass\n")
+        (tmp_path / "b.py").write_text("x = 1\n")
+
+        action = SearchCodeAction(cwd=str(tmp_path))
+        result = action.execute(pattern="def hello")
+
+        assert "a.py" in result
+        assert "def hello" in result
+
+    def test_search_no_match_returns_empty_or_message(self, tmp_path):
+        """search_code with no matches returns an informative result."""
+        (tmp_path / "a.py").write_text("x = 1\n")
+
+        action = SearchCodeAction(cwd=str(tmp_path))
+        result = action.execute(pattern="zzz_nonexistent_zzz")
+
+        # Should not contain file matches
+        assert "a.py" not in result
+
+    def test_search_with_include_filter(self, tmp_path):
+        """search_code with include filters to specific file types."""
+        (tmp_path / "a.py").write_text("target_string\n")
+        (tmp_path / "b.js").write_text("target_string\n")
+
+        action = SearchCodeAction(cwd=str(tmp_path))
+        result = action.execute(pattern="target_string", include="*.py")
+
+        assert "a.py" in result
+        # b.js should be excluded
+        assert "b.js" not in result
+
+    def test_search_regex_support(self, tmp_path):
+        """search_code supports regex patterns."""
+        (tmp_path / "code.py").write_text(
+            "def calculate_sum():\n"
+            "def calculate_product():\n"
+            "def other():\n"
+        )
+
+        action = SearchCodeAction(cwd=str(tmp_path))
+        result = action.execute(pattern=r"def calculate_\w+")
+
+        assert "calculate_sum" in result
+        assert "calculate_product" in result
+
+    def test_search_respects_cwd(self, tmp_path):
+        """search_code searches within cwd, not the system root."""
+        sub = tmp_path / "project"
+        sub.mkdir()
+        (sub / "mod.py").write_text("unique_marker_xyz\n")
+
+        action = SearchCodeAction(cwd=str(sub))
+        result = action.execute(pattern="unique_marker_xyz")
+
+        assert "mod.py" in result
+
+    def test_search_with_path_narrows_scope(self, tmp_path):
+        """search_code with path parameter searches only that subdirectory."""
+        src = tmp_path / "src"
+        tests = tmp_path / "tests"
+        src.mkdir()
+        tests.mkdir()
+        (src / "a.py").write_text("marker\n")
+        (tests / "b.py").write_text("marker\n")
+
+        action = SearchCodeAction(cwd=str(tmp_path))
+        result = action.execute(pattern="marker", path="src")
+
+        assert "a.py" in result
+        assert "b.py" not in result
 
 
 @pytest.mark.unit
@@ -137,11 +420,66 @@ class TestFindFilesAction:
         action = FindFilesAction()
         assert action.name == "find_files"
 
-    def test_find_files_action_execute(self):
-        """FindFilesAction.execute() returns a string result."""
-        action = FindFilesAction()
+    def test_find_files_returns_matching_paths(self, tmp_path):
+        """find_files returns file paths matching the glob pattern."""
+        (tmp_path / "foo.py").write_text("")
+        (tmp_path / "bar.py").write_text("")
+        (tmp_path / "baz.txt").write_text("")
+
+        action = FindFilesAction(cwd=str(tmp_path))
         result = action.execute(pattern="*.py")
-        assert isinstance(result, str)
+
+        assert "foo.py" in result
+        assert "bar.py" in result
+        assert "baz.txt" not in result
+
+    def test_find_files_recursive_glob(self, tmp_path):
+        """find_files supports recursive **/ glob patterns."""
+        sub = tmp_path / "src" / "deep"
+        sub.mkdir(parents=True)
+        (sub / "nested.py").write_text("")
+        (tmp_path / "top.py").write_text("")
+
+        action = FindFilesAction(cwd=str(tmp_path))
+        result = action.execute(pattern="**/*.py")
+
+        assert "nested.py" in result
+        assert "top.py" in result
+
+    def test_find_files_no_match(self, tmp_path):
+        """find_files with no matches returns informative result."""
+        (tmp_path / "a.txt").write_text("")
+
+        action = FindFilesAction(cwd=str(tmp_path))
+        result = action.execute(pattern="*.rs")
+
+        assert "a.txt" not in result
+
+    def test_find_files_with_path_narrows_scope(self, tmp_path):
+        """find_files with path searches only that subdirectory."""
+        src = tmp_path / "src"
+        tests = tmp_path / "tests"
+        src.mkdir()
+        tests.mkdir()
+        (src / "mod.py").write_text("")
+        (tests / "test_mod.py").write_text("")
+
+        action = FindFilesAction(cwd=str(tmp_path))
+        result = action.execute(pattern="*.py", path="src")
+
+        assert "mod.py" in result
+        assert "test_mod.py" not in result
+
+    def test_find_files_respects_cwd(self, tmp_path):
+        """find_files searches within cwd."""
+        sub = tmp_path / "project"
+        sub.mkdir()
+        (sub / "app.py").write_text("")
+
+        action = FindFilesAction(cwd=str(sub))
+        result = action.execute(pattern="*.py")
+
+        assert "app.py" in result
 
 
 @pytest.mark.unit
