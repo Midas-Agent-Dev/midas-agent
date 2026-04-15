@@ -17,12 +17,22 @@ class ReportResultAction(Action):
     @property
     def description(self) -> str:
         return (
-            "Returns results to the agent that hired you. You must call this "
-            "exactly once when your assigned task is complete.\n\n"
+            "Returns your results to the agent that hired you. This is the "
+            "only way to communicate results back to your employer.\n\n"
             "Usage:\n"
-            "* This is the only way to communicate results back to your employer.\n"
-            "* Write a clear, concise summary of what you did and what the outcome was.\n"
-            "* After calling this, your session for this task ends."
+            " - Call this exactly once when your assigned sub-task is "
+            "complete.\n"
+            " - Write a clear, actionable summary: what you found, what "
+            "files are relevant, what the root cause is, and what fix you "
+            "recommend. Your employer will use this to decide next steps.\n"
+            " - Include specific file paths and line numbers when "
+            "referencing code — your employer does not share your context "
+            "window.\n"
+            " - After calling this, your session ends. No further actions "
+            "will be executed.\n\n"
+            "IMPORTANT: Do not just say 'done' or 'task complete'. Provide "
+            "enough detail that your employer can act on your findings "
+            "without having to redo your work."
         )
 
     @property

@@ -12,16 +12,36 @@ class SearchCodeAction(Action):
 
     @property
     def description(self) -> str:
+        cwd_note = f"The current working directory is: {self.cwd}\n" if self.cwd else ""
         return (
-            "Searches file contents using regular expressions. Backed by ripgrep. "
-            "Returns file paths with matching lines, sorted by modification time.\n\n"
+            "Searches file contents using regular expressions. Powered by "
+            "ripgrep for fast, reliable results across large codebases.\n\n"
+            f"{cwd_note}"
             "Usage:\n"
-            "* Supports full regex syntax (e.g. `\"log.*Error\"`, `\"function\\s+\\w+\"`).\n"
-            "* Filter by file type with the `include` parameter (e.g. `\"*.py\"`).\n"
-            "* Returns file paths with at least one match, not full file contents. "
-            "Use `read_file` to inspect matches in detail.\n"
-            "* You can call multiple tools in a single response. It is always "
-            "better to speculatively perform multiple searches in parallel."
+            " - Supports full regex syntax (e.g. `log.*Error`, "
+            "`def\\s+\\w+`, `class\\s+MyClass`).\n"
+            " - Filter files by glob with the `include` parameter (e.g. "
+            "`*.py`, `*.{js,ts}`, `tests/**/*.py`).\n"
+            " - Returns file paths and matching lines. Use `read_file` to "
+            "read the full context around a match.\n"
+            " - You can call multiple tools in a single response. When you "
+            "are not sure which file contains the code you need, issue "
+            "multiple searches in parallel with different patterns rather "
+            "than searching one-by-one — this is faster and costs fewer "
+            "iterations.\n\n"
+            "# Tips for effective searching\n"
+            " - Search for function/class definitions: `def function_name`, "
+            "`class ClassName`\n"
+            " - Search for imports: `from module import`, `import module`\n"
+            " - Search for error messages: use a distinctive substring from "
+            "the error\n"
+            " - If a search returns too many results, narrow it with "
+            "`include` or a more specific pattern\n"
+            " - If a search returns no results, broaden the pattern or try "
+            "alternative names\n\n"
+            "IMPORTANT: ALWAYS use this tool instead of running `grep` or "
+            "`rg` via `bash`. This tool is optimized for the workspace "
+            "environment."
         )
 
     @property
@@ -47,15 +67,27 @@ class FindFilesAction(Action):
 
     @property
     def description(self) -> str:
+        cwd_note = f"The current working directory is: {self.cwd}\n" if self.cwd else ""
         return (
-            "Finds files by name using glob patterns. Returns matching file paths "
-            "sorted by modification time.\n\n"
+            "Fast file pattern matching tool that finds files by name using "
+            "glob patterns. Returns matching file paths sorted by modification "
+            "time.\n\n"
+            f"{cwd_note}"
             "Usage:\n"
-            "* Supports glob patterns like `\"**/*.py\"`, `\"src/**/*.ts\"`.\n"
-            "* Use this when you need to locate files by name pattern, not by content. "
-            "For content search, use `search_code`.\n"
-            "* You can call multiple tools in a single response. It is always "
-            "better to speculatively perform multiple searches in parallel."
+            " - Supports glob patterns like `**/*.py`, `src/**/*.ts`, "
+            "`**/test_*.py`.\n"
+            " - Use this when you need to find files by name or path "
+            "pattern, not by content. For searching inside files, use "
+            "`search_code` instead.\n"
+            " - The `path` parameter narrows the search to a subdirectory "
+            "(e.g. `path='src/models'` to only search within that folder).\n"
+            " - You can call multiple tools in a single response. When "
+            "exploring an unfamiliar codebase, issue multiple find_files "
+            "calls in parallel with different patterns to quickly map the "
+            "project structure.\n\n"
+            "IMPORTANT: ALWAYS use this tool instead of running `find` or "
+            "`ls` via `bash`. This tool is faster and works correctly in "
+            "the workspace environment."
         )
 
     @property
