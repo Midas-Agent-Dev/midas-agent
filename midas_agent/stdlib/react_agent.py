@@ -37,6 +37,8 @@ class ReactAgent:
         max_iterations: int | None = None,
         balance_provider: Callable[[], int] | None = None,
         max_tool_output_chars: int | None = None,
+        max_context_tokens: int | None = None,
+        system_llm: Callable[[LLMRequest], LLMResponse] | None = None,
     ) -> None:
         self.system_prompt = system_prompt
         self.actions = actions
@@ -44,6 +46,8 @@ class ReactAgent:
         self.max_iterations = max_iterations
         self.balance_provider = balance_provider
         self.max_tool_output_chars = max_tool_output_chars
+        self.max_context_tokens = max_context_tokens
+        self.system_llm = system_llm
         self._actions_by_name: dict[str, Action] = {a.name: a for a in actions}
 
     def _build_tools(self) -> list[dict] | None:
@@ -170,6 +174,20 @@ class ReactAgent:
                             termination_reason="done",
                             action_history=action_history,
                         )
+
+                # Compaction check after processing all tool calls
+                if self.max_context_tokens and self.system_llm:
+                    total_chars = sum(len(m.get("content", "")) for m in messages)
+                    total_tokens_est = total_chars // 4
+                    from midas_agent.context.compaction import should_compact, build_compaction_prompt, build_compacted_history
+                    if should_compact(total_tokens_est, self.max_context_tokens):
+                        compact_prompt = build_compaction_prompt(messages)
+                        compact_request = LLMRequest(messages=compact_prompt, model="default")
+                        compact_response = self.system_llm(compact_request)
+                        summary = compact_response.content or ""
+                        messages = build_compacted_history(messages, summary)
+                        if not messages or messages[0].get("role") != "system":
+                            messages.insert(0, {"role": "system", "content": self.system_prompt})
             elif response.content:
                 logger.info("  [iter %d] Response: %s", iterations, response.content[:200])
                 return AgentResult(

@@ -21,8 +21,17 @@ class PlanExecuteAgent(ReactAgent):
         max_iterations: int | None = None,
         market_info_provider: Callable[[], str] | None = None,
         balance_provider: Callable[[], int] | None = None,
+        max_tool_output_chars: int | None = None,
+        max_context_tokens: int | None = None,
+        system_llm: Callable[[LLMRequest], LLMResponse] | None = None,
     ) -> None:
-        super().__init__(system_prompt, actions, call_llm, max_iterations, balance_provider=balance_provider)
+        super().__init__(
+            system_prompt, actions, call_llm, max_iterations,
+            balance_provider=balance_provider,
+            max_tool_output_chars=max_tool_output_chars,
+            max_context_tokens=max_context_tokens,
+            system_llm=system_llm,
+        )
         self.market_info_provider = market_info_provider
 
     def run(self, context: str | None = None) -> AgentResult:
@@ -100,6 +109,11 @@ class PlanExecuteAgent(ReactAgent):
                     result = action.execute(**tool_call.arguments)
                     logger.info("    → %s", result[:300] if result else "(empty)")
 
+                    # Truncate large tool output before it enters conversation history
+                    if self.max_tool_output_chars is not None and result and len(result) > self.max_tool_output_chars:
+                        from midas_agent.context.truncation import truncate_output
+                        result = truncate_output(result, max_chars=self.max_tool_output_chars)
+
                     record = ActionRecord(
                         action_name=tool_call.name,
                         arguments=tool_call.arguments,
@@ -122,6 +136,20 @@ class PlanExecuteAgent(ReactAgent):
                             termination_reason="done",
                             action_history=action_history,
                         )
+
+                # Compaction check after processing all tool calls
+                if self.max_context_tokens and self.system_llm:
+                    total_chars = sum(len(m.get("content", "")) for m in messages)
+                    total_tokens_est = total_chars // 4
+                    from midas_agent.context.compaction import should_compact, build_compaction_prompt, build_compacted_history
+                    if should_compact(total_tokens_est, self.max_context_tokens):
+                        compact_prompt = build_compaction_prompt(messages)
+                        compact_request = LLMRequest(messages=compact_prompt, model="default")
+                        compact_response = self.system_llm(compact_request)
+                        summary = compact_response.content or ""
+                        messages = build_compacted_history(messages, summary)
+                        if not messages or messages[0].get("role") != "system":
+                            messages.insert(0, {"role": "system", "content": self.system_prompt})
             elif response.content:
                 logger.info(
                     "  [iter %d] Text response (no tool call, %d tokens): %s",

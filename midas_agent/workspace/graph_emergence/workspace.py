@@ -34,6 +34,8 @@ class GraphEmergenceWorkspace(Workspace):
         free_agent_manager: FreeAgentManager,
         skill_reviewer: SkillReviewer,
         action_overrides: dict | None = None,
+        max_tool_output_chars: int | None = None,
+        extra_actions: list | None = None,
     ) -> None:
         super().__init__(workspace_id, call_llm, system_llm)
         self._responsible_agent = responsible_agent
@@ -42,6 +44,8 @@ class GraphEmergenceWorkspace(Workspace):
         self._free_agent_manager = free_agent_manager
         self._skill_reviewer = skill_reviewer
         self._action_overrides = action_overrides or {}
+        self._max_tool_output_chars = max_tool_output_chars
+        self._extra_actions = extra_actions or []
         self._budget = 0
         self._last_result = None
         self._patches_dir: str = "/tmp/patches"
@@ -67,7 +71,7 @@ class GraphEmergenceWorkspace(Workspace):
         )
 
         ov = self._action_overrides
-        actions = [
+        actions = list(self._extra_actions) + [
             ov.get("bash", BashAction(cwd=cwd)),
             ov.get("read_file", ReadFileAction(cwd=cwd)),
             ov.get("edit_file", EditFileAction(cwd=cwd)),
@@ -85,6 +89,7 @@ class GraphEmergenceWorkspace(Workspace):
             max_iterations=50,
             market_info_provider=lambda: self._build_market_info(),
             balance_provider=balance_provider,
+            max_tool_output_chars=self._max_tool_output_chars,
         )
         self._last_result = agent.run(context=issue.description)
 
