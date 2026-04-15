@@ -284,7 +284,7 @@ class TestBudgetAllocator:
         allocator = self._make_allocator()
         etas = {"ws-1": 0.008, "ws-2": 0.002}
 
-        allocations = allocator.calculate_allocation(etas)
+        allocations = allocator.calculate_allocation(etas, last_total_consumption=10000)
 
         # ws-1 has 4x the eta of ws-2, so should get ~4x the budget
         assert allocations["ws-1"] > allocations["ws-2"]
@@ -296,7 +296,62 @@ class TestBudgetAllocator:
         allocator = self._make_allocator(multiplier_init=1.0)
         etas: dict[str, float] = {}
 
-        allocations = allocator.calculate_allocation(etas)
+        allocations = allocator.calculate_allocation(etas, last_total_consumption=0)
 
         # With no etas, should return empty or handle gracefully
         assert isinstance(allocations, dict)
+
+    def test_calculate_allocation_pool_equals_last_consumption_times_multiplier(self):
+        """M_pool = C_total_last_round × multiplier.
+
+        Design 03-05: total allocation pool is based on previous episode's
+        actual consumption, not a hardcoded constant."""
+        allocator = self._make_allocator(multiplier_init=1.0)
+        etas = {"ws-1": 0.005, "ws-2": 0.005}  # equal etas → 50/50 split
+
+        last_consumption = 200000  # 200k tokens consumed last round
+        allocations = allocator.calculate_allocation(etas, last_total_consumption=last_consumption)
+
+        total_allocated = sum(allocations.values())
+        # multiplier=1.0, so M_pool = 200000 × 1.0 = 200000
+        assert pytest.approx(total_allocated, rel=0.01) == 200000
+
+    def test_calculate_allocation_pool_scales_with_multiplier(self):
+        """M_pool scales with adaptive multiplier value.
+
+        Design 03-05: multiplier > 1.0 = expansion mode."""
+        am = AdaptiveMultiplier(
+            mode="adaptive", init_value=1.0,
+            er_target=0.1, cool_down=0.05, mult_min=0.5, mult_max=5.0,
+        )
+        # Inflate multiplier: ER=1.0 → emergency double → multiplier=2.0
+        am.update(eviction_rate=1.0)
+        assert am.current_value == pytest.approx(2.0)
+
+        allocator = BudgetAllocator(
+            score_floor=0.01,
+            multiplier_init=1.0,
+            adaptive_multiplier=am,
+        )
+        etas = {"ws-1": 0.005, "ws-2": 0.005}
+
+        allocations = allocator.calculate_allocation(etas, last_total_consumption=100000)
+
+        total_allocated = sum(allocations.values())
+        # M_pool = 100000 × 2.0 = 200000
+        assert pytest.approx(total_allocated, rel=0.01) == 200000
+
+    def test_calculate_allocation_not_hardcoded(self):
+        """Allocation total must depend on last_total_consumption, not a constant.
+
+        Regression test: previous implementation used hardcoded 10000."""
+        allocator = self._make_allocator(multiplier_init=1.0)
+        etas = {"ws-1": 0.01}
+
+        small = allocator.calculate_allocation(etas, last_total_consumption=1000)
+        large = allocator.calculate_allocation(etas, last_total_consumption=500000)
+
+        assert large["ws-1"] > small["ws-1"] * 100, (
+            "Allocation must scale with last_total_consumption, "
+            f"but got small={small['ws-1']}, large={large['ws-1']}"
+        )

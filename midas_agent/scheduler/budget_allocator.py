@@ -117,18 +117,27 @@ class BudgetAllocator:
     def calculate_allocation(
         self,
         episode_etas: dict[str, float],
+        last_total_consumption: int | None = None,
     ) -> dict[str, int]:
         """Distribute budget proportionally to etas.
 
-        Total budget = 10000 * multiplier_init * adaptive_multiplier.current_value.
+        Total budget = last_total_consumption * adaptive_multiplier.current_value.
         Each workspace receives total * (eta_i / sum_etas), rounded to int.
 
         Returns empty dict on cold start (no etas).
+
+        When *last_total_consumption* is ``None`` the legacy fallback
+        ``10000 * multiplier_init * adaptive_multiplier`` is used so that
+        callers that have not yet been updated keep working.
         """
         if not episode_etas:
             return {}
 
-        total_budget = 10000 * self.multiplier_init * self.adaptive_multiplier.current_value
+        if last_total_consumption is not None:
+            total_budget = last_total_consumption * self.adaptive_multiplier.current_value
+        else:
+            # Legacy fallback for callers that don't supply consumption.
+            total_budget = 10000 * self.multiplier_init * self.adaptive_multiplier.current_value
         eta_sum = sum(episode_etas.values())
 
         allocations: dict[str, int] = {}

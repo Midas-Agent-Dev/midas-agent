@@ -45,6 +45,7 @@ class Scheduler:
 
         self._episode_count: int = 0
         self._last_etas: dict[str, float] = {}
+        self._last_total_consumption: int = 0
         self._evicted_ids: list[str] = []
         self._mid_episode_evictions: list[str] = []
         self._all_evicted_ever: set[str] = set()
@@ -112,6 +113,7 @@ class Scheduler:
             # Proportional allocation based on etas.
             allocations = self._budget_allocator.calculate_allocation(
                 self._last_etas,
+                last_total_consumption=self._last_total_consumption,
             )
             for ws in workspaces:
                 amount = allocations.get(ws.workspace_id, 0)
@@ -149,6 +151,7 @@ class Scheduler:
 
         etas = self._budget_allocator.calculate_eta(scores, costs)
         self._last_etas = etas
+        self._last_total_consumption = sum(costs.values())
 
         evicted, survivors = self._selection_engine.run_selection(etas)
         self._evicted_ids = evicted

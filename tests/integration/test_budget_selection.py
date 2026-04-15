@@ -62,7 +62,7 @@ class TestBudgetSelectionIntegration:
     def test_cold_start_allocation(self):
         """No prior etas (empty dict). calculate_allocation returns uniform allocation."""
         allocator, _ = _make_allocator()
-        allocations = allocator.calculate_allocation({})
+        allocations = allocator.calculate_allocation({}, last_total_consumption=0)
 
         assert isinstance(allocations, dict)
         # With no etas at all, the result should either be empty or all
@@ -92,7 +92,7 @@ class TestBudgetSelectionIntegration:
         assert pytest.approx(etas["ws2"], rel=1e-6) == 0.2 / 1000
         assert pytest.approx(etas["ws1"] / etas["ws2"], rel=1e-6) == 4.0
 
-        allocations = allocator.calculate_allocation(etas)
+        allocations = allocator.calculate_allocation(etas, last_total_consumption=200000)
 
         assert allocations["ws1"] > 0
         assert allocations["ws2"] > 0
@@ -116,7 +116,7 @@ class TestBudgetSelectionIntegration:
         assert etas["ws1"] == pytest.approx(0.01 / 500, rel=1e-6)
         assert etas["ws1"] > 0, "Score floor must prevent zero eta"
 
-        allocations = allocator.calculate_allocation(etas)
+        allocations = allocator.calculate_allocation(etas, last_total_consumption=200000)
         assert allocations["ws1"] > 0, "Workspace with floored score must get nonzero allocation"
 
     # -----------------------------------------------------------------------
@@ -139,7 +139,7 @@ class TestBudgetSelectionIntegration:
         median_existing = statistics.median([0.005, 0.010, 0.015])
         assert pytest.approx(etas["ws4"], rel=1e-6) == median_existing
 
-        allocations = allocator.calculate_allocation(etas)
+        allocations = allocator.calculate_allocation(etas, last_total_consumption=200000)
         assert allocations["ws4"] > 0, "New workspace must receive budget via median eta"
 
     # -----------------------------------------------------------------------
@@ -334,7 +334,7 @@ class TestBudgetSelectionIntegration:
         engine = SelectionEngine("config_evolution", n_evict=1)
 
         # ===== Episode 1: Cold start =====
-        cold_allocations = allocator.calculate_allocation({})
+        cold_allocations = allocator.calculate_allocation({}, last_total_consumption=0)
         assert isinstance(cold_allocations, dict)
 
         # ===== Episode 2: Etas from episode 1 scores =====
