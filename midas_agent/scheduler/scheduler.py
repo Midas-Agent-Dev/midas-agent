@@ -110,9 +110,17 @@ class Scheduler:
                 for ws_id in missing_ids:
                     self._last_etas[ws_id] = median_eta
 
+            # Filter etas to active workspaces so evicted entries don't
+            # consume part of the budget pool.
+            active_etas = {
+                ws_id: eta
+                for ws_id, eta in self._last_etas.items()
+                if ws_id in current_ids
+            }
+
             # Proportional allocation based on etas.
             allocations = self._budget_allocator.calculate_allocation(
-                self._last_etas,
+                active_etas,
                 last_total_consumption=self._last_total_consumption,
             )
             for ws in workspaces:
@@ -155,6 +163,16 @@ class Scheduler:
 
         evicted, survivors = self._selection_engine.run_selection(etas)
         self._evicted_ids = evicted
+
+        # Compute eviction rate (ER) and update the adaptive multiplier.
+        # Combine mid-episode budget-exhaustion evictions with ranking
+        # evictions (deduplicated) per design doc 03-05.
+        adaptive_mult = getattr(self._budget_allocator, "adaptive_multiplier", None)
+        if adaptive_mult is not None:
+            combined_evicted = set(self._mid_episode_evictions) | set(evicted)
+            total_workspaces = len(etas)
+            er = len(combined_evicted) / total_workspaces if total_workspaces > 0 else 0.0
+            adaptive_mult.update(eviction_rate=er)
 
         return evicted, survivors, eval_results
 

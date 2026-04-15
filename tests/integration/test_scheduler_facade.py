@@ -860,3 +860,477 @@ class TestGetBalance:
             f"After 3 metered calls, Scheduler.get_balance()={balance} "
             f"should equal TrainingLog.get_balance()={expected}"
         )
+
+
+# ---------------------------------------------------------------------------
+# IT-4.9: Adaptive multiplier updated after evaluate_and_select
+# ---------------------------------------------------------------------------
+
+
+def _build_adaptive_scheduler(
+    config: MidasConfig,
+    storage: InMemoryStorageBackend,
+    hooks: SpyHookSet,
+    llm_provider: FakeLLMProvider,
+) -> dict:
+    """Build Scheduler with adaptive multiplier, returning all components."""
+    serial_queue = SerialQueue()
+    training_log = TrainingLog(
+        storage=storage, hooks=hooks, serial_queue=serial_queue,
+    )
+    resource_meter = ResourceMeter(
+        training_log=training_log, llm_provider=llm_provider,
+    )
+    system_llm = SystemLLM(llm_provider=llm_provider)
+
+    adaptive_multiplier = AdaptiveMultiplier(
+        mode=config.multiplier_mode,
+        init_value=config.multiplier_init,
+        er_target=config.er_target,
+        cool_down=config.cool_down,
+        mult_min=config.mult_min,
+        mult_max=config.mult_max,
+    )
+    budget_allocator = BudgetAllocator(
+        score_floor=config.score_floor,
+        multiplier_init=config.multiplier_init,
+        adaptive_multiplier=adaptive_multiplier,
+    )
+    selection_engine = SelectionEngine(
+        runtime_mode=config.runtime_mode,
+        n_evict=config.n_evict,
+    )
+    workspace_manager = WorkspaceManager(
+        config=config,
+        call_llm_factory=lambda ws_id: (
+            lambda req: resource_meter.process(req, ws_id, ws_id)
+        ),
+        system_llm_callback=lambda req: system_llm.call(req),
+    )
+    evaluation_module = MagicMock(spec=EvaluationModule)
+
+    scheduler = Scheduler(
+        config=config,
+        training_log=training_log,
+        resource_meter=resource_meter,
+        system_llm=system_llm,
+        budget_allocator=budget_allocator,
+        selection_engine=selection_engine,
+        workspace_manager=workspace_manager,
+        evaluation_module=evaluation_module,
+    )
+
+    return {
+        "scheduler": scheduler,
+        "config": config,
+        "training_log": training_log,
+        "adaptive_multiplier": adaptive_multiplier,
+        "budget_allocator": budget_allocator,
+        "evaluation_module": evaluation_module,
+        "hooks": hooks,
+    }
+
+
+@pytest.mark.integration
+class TestAdaptiveMultiplierLifecycle:
+    """IT-4.9: Scheduler must call adaptive_multiplier.update() after
+    evaluate_and_select with the correct eviction rate. The multiplier
+    value must then affect the next episode's allocation pool.
+
+    Design 03-05: 'Every evaluation triggers multiplier update with
+    ER = evicted / total. M_pool = C_total_last_round × multiplier.'"""
+
+    def test_multiplier_updated_after_config_evolution_eviction(self):
+        """Config Evolution: 1 of 3 evicted → ER=1/3 → moderate inflate (×1.2).
+        Multiplier must change from 1.0 to 1.2 after evaluate_and_select."""
+        config = MidasConfig(
+            initial_budget=10000,
+            workspace_count=3,
+            runtime_mode="config_evolution",
+            n_evict=1,
+            score_floor=0.01,
+            multiplier_mode="adaptive",
+            multiplier_init=1.0,
+            er_target=0.1,
+            cool_down=0.05,
+            mult_min=0.5,
+            mult_max=5.0,
+            beta=0.3,
+        )
+        assembly = _build_adaptive_scheduler(
+            config, InMemoryStorageBackend(), SpyHookSet(),
+            FakeLLMProvider(responses=[_DEFAULT_RESPONSE] * 50),
+        )
+        sch = assembly["scheduler"]
+        am = assembly["adaptive_multiplier"]
+        eval_mod = assembly["evaluation_module"]
+        training_log = assembly["training_log"]
+
+        assert am.current_value == 1.0
+
+        sch.create_workspaces()
+        sch.allocate_budgets()
+        ws_ids = [ws.workspace_id for ws in sch.get_workspaces()]
+
+        # Simulate consumption
+        for ws_id in ws_ids:
+            training_log.record_consume(entity_id=ws_id, amount=500, workspace_id=ws_id)
+
+        # Evaluation: scores differ so bottom ws gets evicted
+        eval_results = {}
+        for ws_id, score in zip(ws_ids, [0.9, 0.5, 0.1]):
+            eval_results[ws_id] = EvalResult(
+                workspace_id=ws_id, episode_id="ep-1",
+                s_exec=score, s_llm=score, s_w=score,
+            )
+        eval_mod.evaluate_all.return_value = eval_results
+
+        patches = {ws_id: f"patch-{ws_id}" for ws_id in ws_ids}
+        evicted, survivors, _ = sch.evaluate_and_select(patches)
+        assert len(evicted) == 1
+
+        # ER = 1/3 ≈ 0.33 → Zone 3 (moderate inflate) → ×1.2
+        assert am.current_value == pytest.approx(1.2), (
+            f"After ER=1/3, multiplier should be 1.2, got {am.current_value}"
+        )
+
+    def test_multiplier_deflates_when_no_eviction(self):
+        """Config Evolution: 0 of 3 evicted → ER=0 → deflate (×0.95).
+        n_evict=0 so no eviction happens."""
+        config = MidasConfig(
+            initial_budget=10000,
+            workspace_count=3,
+            runtime_mode="config_evolution",
+            n_evict=0,
+            score_floor=0.01,
+            multiplier_mode="adaptive",
+            multiplier_init=1.0,
+            er_target=0.1,
+            cool_down=0.05,
+            mult_min=0.5,
+            mult_max=5.0,
+            beta=0.3,
+        )
+        assembly = _build_adaptive_scheduler(
+            config, InMemoryStorageBackend(), SpyHookSet(),
+            FakeLLMProvider(responses=[_DEFAULT_RESPONSE] * 50),
+        )
+        sch = assembly["scheduler"]
+        am = assembly["adaptive_multiplier"]
+        eval_mod = assembly["evaluation_module"]
+        training_log = assembly["training_log"]
+
+        sch.create_workspaces()
+        sch.allocate_budgets()
+        ws_ids = [ws.workspace_id for ws in sch.get_workspaces()]
+
+        for ws_id in ws_ids:
+            training_log.record_consume(entity_id=ws_id, amount=500, workspace_id=ws_id)
+
+        eval_results = {}
+        for ws_id, score in zip(ws_ids, [0.9, 0.5, 0.1]):
+            eval_results[ws_id] = EvalResult(
+                workspace_id=ws_id, episode_id="ep-1",
+                s_exec=score, s_llm=score, s_w=score,
+            )
+        eval_mod.evaluate_all.return_value = eval_results
+
+        patches = {ws_id: f"patch-{ws_id}" for ws_id in ws_ids}
+        evicted, _, _ = sch.evaluate_and_select(patches)
+        assert len(evicted) == 0
+
+        # ER = 0 → Zone 1 → deflate by cool_down
+        assert am.current_value == pytest.approx(1.0 * (1 - 0.05)), (
+            f"After ER=0, multiplier should deflate to 0.95, got {am.current_value}"
+        )
+
+    def test_multiplier_affects_next_allocation_pool(self):
+        """After multiplier inflates to 1.2, the second episode's total
+        allocation = last_consumption × 1.2, not last_consumption × 1.0."""
+        config = MidasConfig(
+            initial_budget=10000,
+            workspace_count=3,
+            runtime_mode="config_evolution",
+            n_evict=1,
+            score_floor=0.01,
+            multiplier_mode="adaptive",
+            multiplier_init=1.0,
+            er_target=0.1,
+            cool_down=0.05,
+            mult_min=0.5,
+            mult_max=5.0,
+            beta=0.3,
+        )
+        assembly = _build_adaptive_scheduler(
+            config, InMemoryStorageBackend(), SpyHookSet(),
+            FakeLLMProvider(responses=[_DEFAULT_RESPONSE] * 100),
+        )
+        sch = assembly["scheduler"]
+        am = assembly["adaptive_multiplier"]
+        eval_mod = assembly["evaluation_module"]
+        training_log = assembly["training_log"]
+
+        # Episode 1: cold start
+        sch.create_workspaces()
+        sch.allocate_budgets()
+        ws_ids = [ws.workspace_id for ws in sch.get_workspaces()]
+
+        # Each consumes 3000 → total = 9000
+        for ws_id in ws_ids:
+            training_log.record_consume(entity_id=ws_id, amount=3000, workspace_id=ws_id)
+
+        eval_results = {}
+        for ws_id, score in zip(ws_ids, [0.9, 0.5, 0.1]):
+            eval_results[ws_id] = EvalResult(
+                workspace_id=ws_id, episode_id="ep-1",
+                s_exec=score, s_llm=score, s_w=score,
+            )
+        eval_mod.evaluate_all.return_value = eval_results
+
+        patches = {ws_id: f"patch-{ws_id}" for ws_id in ws_ids}
+        sch.evaluate_and_select(patches)
+
+        # ER=1/3 → multiplier = 1.2
+        assert am.current_value == pytest.approx(1.2)
+
+        # Episode 2: allocate with inflated multiplier
+        # Replace evicted workspace first
+        sch.replace_evicted([{"name": "new"}])
+
+        # Record balances before second allocation
+        balances_before = {
+            ws.workspace_id: training_log.get_balance(ws.workspace_id)
+            for ws in sch.get_workspaces()
+        }
+
+        sch.allocate_budgets()
+
+        balances_after = {
+            ws.workspace_id: training_log.get_balance(ws.workspace_id)
+            for ws in sch.get_workspaces()
+        }
+
+        # Total new allocation = sum of deltas
+        total_new_alloc = sum(
+            balances_after[ws_id] - balances_before.get(ws_id, 0)
+            for ws_id in balances_after
+        )
+
+        # M_pool = last_total_consumption(9000) × multiplier(1.2) = 10800
+        expected_pool = 9000 * 1.2
+        assert pytest.approx(total_new_alloc, rel=0.05) == expected_pool, (
+            f"Second episode allocation should be ~{expected_pool}, "
+            f"got {total_new_alloc}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# IT-4.10: GE mode — mid-episode eviction feeds ER for adaptive multiplier
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+class TestGEModeAdaptiveMultiplier:
+    """IT-4.10: In Graph Emergence mode, SelectionEngine returns evicted=[].
+    But mid-episode budget exhaustion fires on_workspace_evicted. The
+    Scheduler must include mid-episode evictions in the ER passed to
+    adaptive_multiplier.update().
+
+    Design: 'responsible agent budget exhausted → workspace evict (hard
+    constraint)'. This is the only eviction signal in GE mode."""
+
+    def test_ge_mid_episode_eviction_inflates_multiplier(self):
+        """GE mode, 2 workspaces, ws-0 budget-exhausted mid-episode.
+        ER = 1/2 = 0.5 → moderate inflate (×1.2). The multiplier must
+        NOT stay at 1.0 just because SelectionEngine returns []."""
+        config = MidasConfig(
+            initial_budget=200,  # Very low to trigger exhaustion
+            workspace_count=2,
+            runtime_mode="graph_emergence",
+            n_evict=1,
+            score_floor=0.01,
+            multiplier_mode="adaptive",
+            multiplier_init=1.0,
+            er_target=0.1,
+            cool_down=0.05,
+            mult_min=0.5,
+            mult_max=5.0,
+            beta=0.3,
+        )
+
+        storage = InMemoryStorageBackend()
+        hooks = SpyHookSet()
+
+        # First call: 300 tokens → exhausts ws-0's 200 budget
+        high_usage = LLMResponse(
+            content="expensive",
+            tool_calls=None,
+            usage=TokenUsage(input_tokens=150, output_tokens=150),
+        )
+        normal = _DEFAULT_RESPONSE
+        llm_provider = FakeLLMProvider(responses=[high_usage] + [normal] * 50)
+
+        assembly = _build_adaptive_scheduler(config, storage, hooks, llm_provider)
+        sch = assembly["scheduler"]
+        am = assembly["adaptive_multiplier"]
+        eval_mod = assembly["evaluation_module"]
+        training_log = assembly["training_log"]
+
+        assert am.current_value == 1.0
+
+        sch.create_workspaces()
+        sch.allocate_budgets()
+
+        workspaces = sch.get_workspaces()
+        ws_ids = [ws.workspace_id for ws in workspaces]
+
+        # ws-0 exhausts budget (metered call consumes 300 > 200 budget)
+        from midas_agent.scheduler.resource_meter import BudgetExhaustedError
+        for ws in workspaces:
+            try:
+                # Simulate a metered LLM call
+                callback = sch.get_metered_llm_callback(ws.workspace_id)
+                callback(_make_request("work"))
+            except BudgetExhaustedError:
+                pass
+
+        # At least one workspace should have been evicted mid-episode
+        mid_evictions = sch.get_mid_episode_evictions()
+        assert len(mid_evictions) >= 1, (
+            "Budget exhaustion must register as mid-episode eviction"
+        )
+
+        # Now evaluate — SelectionEngine returns evicted=[] for GE
+        eval_results = {}
+        for ws_id in ws_ids:
+            eval_results[ws_id] = EvalResult(
+                workspace_id=ws_id, episode_id="ep-1",
+                s_exec=0.5, s_llm=0.5, s_w=0.5,
+            )
+        eval_mod.evaluate_all.return_value = eval_results
+
+        patches = {ws_id: "" for ws_id in ws_ids}
+        evicted, survivors, _ = sch.evaluate_and_select(patches)
+
+        # SelectionEngine returns no eviction for GE
+        assert evicted == []
+
+        # But multiplier should have been updated with ER > 0
+        # (based on mid-episode evictions)
+        assert am.current_value > 1.0, (
+            f"GE mode: mid-episode evictions should inflate multiplier, "
+            f"but got {am.current_value}"
+        )
+
+    def test_ge_no_exhaustion_deflates_multiplier(self):
+        """GE mode, 2 workspaces, neither exhausts budget. ER=0 → deflate."""
+        config = MidasConfig(
+            initial_budget=100000,  # High enough — no exhaustion
+            workspace_count=2,
+            runtime_mode="graph_emergence",
+            n_evict=1,
+            score_floor=0.01,
+            multiplier_mode="adaptive",
+            multiplier_init=1.0,
+            er_target=0.1,
+            cool_down=0.05,
+            mult_min=0.5,
+            mult_max=5.0,
+            beta=0.3,
+        )
+
+        assembly = _build_adaptive_scheduler(
+            config, InMemoryStorageBackend(), SpyHookSet(),
+            FakeLLMProvider(responses=[_DEFAULT_RESPONSE] * 50),
+        )
+        sch = assembly["scheduler"]
+        am = assembly["adaptive_multiplier"]
+        eval_mod = assembly["evaluation_module"]
+        training_log = assembly["training_log"]
+
+        sch.create_workspaces()
+        sch.allocate_budgets()
+        ws_ids = [ws.workspace_id for ws in sch.get_workspaces()]
+
+        # Light consumption — no exhaustion
+        for ws_id in ws_ids:
+            training_log.record_consume(entity_id=ws_id, amount=100, workspace_id=ws_id)
+
+        eval_results = {}
+        for ws_id in ws_ids:
+            eval_results[ws_id] = EvalResult(
+                workspace_id=ws_id, episode_id="ep-1",
+                s_exec=0.8, s_llm=0.8, s_w=0.8,
+            )
+        eval_mod.evaluate_all.return_value = eval_results
+
+        patches = {ws_id: "patch" for ws_id in ws_ids}
+        sch.evaluate_and_select(patches)
+
+        # No mid-episode evictions, no ranking evictions → ER=0 → deflate
+        assert am.current_value == pytest.approx(1.0 * (1 - 0.05)), (
+            f"GE mode with no exhaustion: multiplier should deflate to 0.95, "
+            f"got {am.current_value}"
+        )
+
+    def test_ge_all_exhausted_emergency_double(self):
+        """GE mode, 2 workspaces, BOTH exhaust budget. ER=2/2=1.0 → ×2.0."""
+        config = MidasConfig(
+            initial_budget=100,  # Extremely low
+            workspace_count=2,
+            runtime_mode="graph_emergence",
+            n_evict=1,
+            score_floor=0.01,
+            multiplier_mode="adaptive",
+            multiplier_init=1.0,
+            er_target=0.1,
+            cool_down=0.05,
+            mult_min=0.5,
+            mult_max=5.0,
+            beta=0.3,
+        )
+
+        high_usage = LLMResponse(
+            content="expensive",
+            tool_calls=None,
+            usage=TokenUsage(input_tokens=100, output_tokens=100),
+        )
+        assembly = _build_adaptive_scheduler(
+            config, InMemoryStorageBackend(), SpyHookSet(),
+            FakeLLMProvider(responses=[high_usage] * 50),
+        )
+        sch = assembly["scheduler"]
+        am = assembly["adaptive_multiplier"]
+        eval_mod = assembly["evaluation_module"]
+
+        sch.create_workspaces()
+        sch.allocate_budgets()
+        ws_ids = [ws.workspace_id for ws in sch.get_workspaces()]
+
+        # Both workspaces exhaust budget
+        from midas_agent.scheduler.resource_meter import BudgetExhaustedError
+        for ws in sch.get_workspaces():
+            try:
+                callback = sch.get_metered_llm_callback(ws.workspace_id)
+                callback(_make_request("work"))
+            except BudgetExhaustedError:
+                pass
+
+        # Both should be mid-episode evicted
+        assert len(sch.get_mid_episode_evictions()) == 2
+
+        eval_results = {
+            ws_id: EvalResult(
+                workspace_id=ws_id, episode_id="ep-1",
+                s_exec=0.0, s_llm=0.0, s_w=0.0,
+            )
+            for ws_id in ws_ids
+        }
+        eval_mod.evaluate_all.return_value = eval_results
+        sch.evaluate_and_select({ws_id: "" for ws_id in ws_ids})
+
+        # ER = 2/2 = 1.0 → emergency double
+        assert am.current_value == pytest.approx(2.0), (
+            f"All workspaces exhausted: multiplier should double to 2.0, "
+            f"got {am.current_value}"
+        )
