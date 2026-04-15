@@ -130,17 +130,37 @@ class GraphEmergenceWorkspace(Workspace):
             f.write(patch_content)
 
     def _generate_patch(self) -> str:
-        """Get patch content from git diff if work_dir is set."""
+        """Get patch content from git diff if work_dir is set.
+
+        Stages all changes (including untracked files) to capture the
+        full diff, then resets the index so the working tree is unchanged.
+        """
         if self.work_dir and os.path.isdir(os.path.join(self.work_dir, ".git")):
             try:
+                # Stage everything so untracked new files appear in the diff
+                subprocess.run(
+                    ["git", "add", "-A"],
+                    cwd=self.work_dir,
+                    capture_output=True,
+                    timeout=10,
+                )
+                # Diff the staged changes against HEAD
                 result = subprocess.run(
-                    ["git", "diff"],
+                    ["git", "diff", "--cached"],
                     cwd=self.work_dir,
                     capture_output=True,
                     text=True,
                     timeout=30,
                 )
-                return result.stdout
+                patch = result.stdout
+                # Reset index so we don't leave staged changes behind
+                subprocess.run(
+                    ["git", "reset"],
+                    cwd=self.work_dir,
+                    capture_output=True,
+                    timeout=10,
+                )
+                return patch
             except Exception:
                 pass
         return ""
