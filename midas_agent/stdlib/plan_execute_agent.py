@@ -20,8 +20,9 @@ class PlanExecuteAgent(ReactAgent):
         call_llm: Callable[[LLMRequest], LLMResponse],
         max_iterations: int | None = None,
         market_info_provider: Callable[[], str] | None = None,
+        balance_provider: Callable[[], int] | None = None,
     ) -> None:
-        super().__init__(system_prompt, actions, call_llm, max_iterations)
+        super().__init__(system_prompt, actions, call_llm, max_iterations, balance_provider=balance_provider)
         self.market_info_provider = market_info_provider
 
     def run(self, context: str | None = None) -> AgentResult:
@@ -31,47 +32,19 @@ class PlanExecuteAgent(ReactAgent):
         action_history: list[ActionRecord] = []
         messages: list[dict] = [{"role": "system", "content": self.system_prompt}]
 
-        # Build planning prompt with market info and context
-        planning_parts: list[str] = []
-        planning_parts.append("Create a plan for the following task.")
+        # Build user message with budget info and task context
+        user_parts: list[str] = []
 
         if self.market_info_provider is not None:
             market_info = self.market_info_provider()
-            planning_parts.append(f"Market info: {market_info}")
+            user_parts.append(market_info)
 
         if context is not None:
-            planning_parts.append(f"Task context: {context}")
+            user_parts.append(f"\nTask:\n{context}")
 
-        messages.append({"role": "user", "content": "\n".join(planning_parts)})
+        messages.append({"role": "user", "content": "\n".join(user_parts)})
 
-        # Planning phase: call LLM once to get a plan (no tools)
-        try:
-            plan_request = LLMRequest(messages=messages, model="default")
-            plan_response = self.call_llm(plan_request)
-        except BudgetExhaustedError:
-            logger.info("  Budget exhausted during planning phase")
-            return AgentResult(
-                output="",
-                iterations=iterations,
-                termination_reason="budget_exhausted",
-                action_history=action_history,
-            )
-
-        iterations += 1
-        plan_text = plan_response.content or ""
-        plan_tokens = plan_response.usage.input_tokens + plan_response.usage.output_tokens
-        logger.info("  [Plan] (%d tokens) %s", plan_tokens, plan_text[:2000])
-
-        # Add plan to conversation as assistant response
-        messages.append({"role": "assistant", "content": plan_text})
-
-        # Add execution instruction
-        messages.append({
-            "role": "user",
-            "content": "Now execute the plan step by step.",
-        })
-
-        # Execution phase: standard ReAct loop
+        # ReAct loop (tools available from the start)
         while True:
             if self.max_iterations is not None and iterations >= self.max_iterations:
                 logger.info("  Hit max_iterations (%d). Stopping.", self.max_iterations)

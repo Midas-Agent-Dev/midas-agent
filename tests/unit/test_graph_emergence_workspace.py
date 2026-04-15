@@ -1,5 +1,5 @@
 """Unit tests for GraphEmergenceWorkspace."""
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -7,9 +7,16 @@ from midas_agent.workspace.graph_emergence.workspace import GraphEmergenceWorksp
 from midas_agent.workspace.base import Workspace
 from midas_agent.workspace.graph_emergence.agent import Agent, Soul
 from midas_agent.workspace.graph_emergence.free_agent_manager import FreeAgentManager
-from midas_agent.workspace.graph_emergence.skill import SkillReviewer
+from midas_agent.workspace.graph_emergence.pricing import PricingEngine
+from midas_agent.workspace.graph_emergence.skill import Skill, SkillReviewer
+from midas_agent.scheduler.serial_queue import SerialQueue
+from midas_agent.scheduler.training_log import HookSet, TrainingLog
+from midas_agent.stdlib.plan_execute_agent import PlanExecuteAgent
+from midas_agent.stdlib.actions.delegate_task import DelegateTaskAction
 from midas_agent.types import Issue
 from midas_agent.llm.types import LLMRequest, LLMResponse, TokenUsage
+
+from tests.unit.conftest import InMemoryStorageBackend
 
 
 @pytest.mark.unit
@@ -138,3 +145,218 @@ class TestGraphEmergenceWorkspace:
         result = ws.post_episode({"score": 0.8, "cost": 300}, evicted_ids=[])
 
         assert result is None
+
+    def test_execute_passes_balance_provider_to_plan_execute_agent(self):
+        """execute() must pass a balance_provider to PlanExecuteAgent so the
+        agent sees its token balance after every tool result."""
+        ws = self._make_workspace()
+        ws.receive_budget(8000)
+
+        issue = Issue(
+            issue_id="issue-1",
+            repo="test/repo",
+            description="Fix bug",
+        )
+
+        captured_kwargs: dict = {}
+        original_init = PlanExecuteAgent.__init__
+
+        def spy_init(self_agent, *args, **kwargs):
+            captured_kwargs.update(kwargs)
+            original_init(self_agent, *args, **kwargs)
+
+        with patch.object(PlanExecuteAgent, "__init__", spy_init):
+            ws.execute(issue)
+
+        assert "balance_provider" in captured_kwargs, \
+            "PlanExecuteAgent must receive balance_provider"
+        assert captured_kwargs["balance_provider"] is not None
+        assert callable(captured_kwargs["balance_provider"])
+
+    def test_execute_passes_balance_provider_to_delegate_task(self):
+        """execute() must pass a balance_provider to DelegateTaskAction so the
+        agent sees its balance when comparing candidate prices."""
+        ws = self._make_workspace()
+        ws.receive_budget(6000)
+
+        issue = Issue(
+            issue_id="issue-1",
+            repo="test/repo",
+            description="Fix bug",
+        )
+
+        captured_kwargs: dict = {}
+        original_init = DelegateTaskAction.__init__
+
+        def spy_init(self_action, *args, **kwargs):
+            captured_kwargs.update(kwargs)
+            original_init(self_action, *args, **kwargs)
+
+        with patch.object(DelegateTaskAction, "__init__", spy_init):
+            ws.execute(issue)
+
+        assert "balance_provider" in captured_kwargs, \
+            "DelegateTaskAction must receive balance_provider"
+        assert captured_kwargs["balance_provider"] is not None
+        assert callable(captured_kwargs["balance_provider"])
+
+    def test_balance_provider_returns_current_budget(self):
+        """The balance_provider callback must return the workspace's current budget."""
+        ws = self._make_workspace()
+        ws.receive_budget(5000)
+
+        issue = Issue(
+            issue_id="issue-1",
+            repo="test/repo",
+            description="Fix bug",
+        )
+
+        captured_provider = None
+        original_init = PlanExecuteAgent.__init__
+
+        def spy_init(self_agent, *args, **kwargs):
+            nonlocal captured_provider
+            captured_provider = kwargs.get("balance_provider")
+            original_init(self_agent, *args, **kwargs)
+
+        with patch.object(PlanExecuteAgent, "__init__", spy_init):
+            ws.execute(issue)
+
+        assert captured_provider is not None
+        assert captured_provider() == 5000
+
+    def test_market_info_provider_returns_real_info(self):
+        """market_info_provider must return real budget and pool info,
+        not the hardcoded 'budget info' string."""
+        ws = self._make_workspace()
+        ws.receive_budget(7500)
+
+        issue = Issue(
+            issue_id="issue-1",
+            repo="test/repo",
+            description="Fix bug",
+        )
+
+        captured_provider = None
+        original_init = PlanExecuteAgent.__init__
+
+        def spy_init(self_agent, *args, **kwargs):
+            nonlocal captured_provider
+            captured_provider = kwargs.get("market_info_provider")
+            original_init(self_agent, *args, **kwargs)
+
+        with patch.object(PlanExecuteAgent, "__init__", spy_init):
+            ws.execute(issue)
+
+        assert captured_provider is not None
+        info = captured_provider()
+        assert isinstance(info, str)
+        assert info != "budget info", \
+            "market_info_provider must return real info, not hardcoded 'budget info'"
+
+    def test_execute_passes_calling_agent_id_to_delegate(self):
+        """execute() must pass calling_agent_id (the responsible agent's id)
+        to DelegateTaskAction so it can label 幼年agent in candidate output."""
+        ws = self._make_workspace()
+
+        issue = Issue(
+            issue_id="issue-1",
+            repo="test/repo",
+            description="Fix bug",
+        )
+
+        captured_kwargs: dict = {}
+        original_init = DelegateTaskAction.__init__
+
+        def spy_init(self_action, *args, **kwargs):
+            captured_kwargs.update(kwargs)
+            original_init(self_action, *args, **kwargs)
+
+        with patch.object(DelegateTaskAction, "__init__", spy_init):
+            ws.execute(issue)
+
+        assert "calling_agent_id" in captured_kwargs, \
+            "DelegateTaskAction must receive calling_agent_id"
+        assert captured_kwargs["calling_agent_id"] == "lead-1"
+
+    def test_market_info_lists_agents_with_prices(self):
+        """market_info_provider must list available free agents with their
+        prices, so the LLM can plan delegation during the planning phase."""
+        storage = InMemoryStorageBackend()
+        training_log = TrainingLog(
+            storage=storage, hooks=HookSet(), serial_queue=SerialQueue(),
+        )
+        pricing_engine = PricingEngine(training_log=training_log)
+        free_agent_manager = FreeAgentManager(pricing_engine=pricing_engine)
+
+        # Register two agents with skills
+        agent_a = Agent(
+            agent_id="expert-a",
+            soul=Soul(system_prompt="expert"),
+            agent_type="free",
+            skill=Skill(name="debugging", description="Debug expert", content="..."),
+        )
+        agent_b = Agent(
+            agent_id="expert-b",
+            soul=Soul(system_prompt="expert"),
+            agent_type="free",
+            skill=Skill(name="testing", description="Test writer", content="..."),
+        )
+        free_agent_manager.register(agent_a)
+        free_agent_manager.register(agent_b)
+
+        ws = GraphEmergenceWorkspace(
+            workspace_id="ws-ge-1",
+            responsible_agent=self._make_agent(),
+            call_llm=self._make_call_llm(),
+            system_llm=self._make_call_llm(),
+            free_agent_manager=free_agent_manager,
+            skill_reviewer=MagicMock(spec=SkillReviewer),
+        )
+        ws.receive_budget(10000)
+
+        issue = Issue(issue_id="issue-1", repo="test/repo", description="Fix bug")
+
+        captured_provider = None
+        original_init = PlanExecuteAgent.__init__
+
+        def spy_init(self_agent, *args, **kwargs):
+            nonlocal captured_provider
+            captured_provider = kwargs.get("market_info_provider")
+            original_init(self_agent, *args, **kwargs)
+
+        with patch.object(PlanExecuteAgent, "__init__", spy_init):
+            ws.execute(issue)
+
+        assert captured_provider is not None
+        info = captured_provider()
+        # Must list both agents by ID
+        assert "expert-a" in info, f"market_info must list agent IDs: {info}"
+        assert "expert-b" in info, f"market_info must list agent IDs: {info}"
+        # Must include prices (integers from PricingEngine)
+        price_a = pricing_engine.calculate_price(agent_a)
+        price_b = pricing_engine.calculate_price(agent_b)
+        assert str(price_a) in info, f"market_info must include price {price_a}: {info}"
+        assert str(price_b) in info, f"market_info must include price {price_b}: {info}"
+
+    def test_market_info_includes_balance(self):
+        """market_info must include the workspace's current token balance."""
+        ws = self._make_workspace()
+        ws.receive_budget(42000)
+
+        issue = Issue(issue_id="issue-1", repo="test/repo", description="Fix bug")
+
+        captured_provider = None
+        original_init = PlanExecuteAgent.__init__
+
+        def spy_init(self_agent, *args, **kwargs):
+            nonlocal captured_provider
+            captured_provider = kwargs.get("market_info_provider")
+            original_init(self_agent, *args, **kwargs)
+
+        with patch.object(PlanExecuteAgent, "__init__", spy_init):
+            ws.execute(issue)
+
+        assert captured_provider is not None
+        info = captured_provider()
+        assert "42000" in info, f"market_info must include balance: {info}"

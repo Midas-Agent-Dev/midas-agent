@@ -14,11 +14,12 @@ class ReadFileAction(Action):
 
     @property
     def description(self) -> str:
+        cwd_line = f"* Working directory: {self.cwd}\n" if self.cwd else ""
         return (
             "Reads a file from the local filesystem. Returns content with "
             "line numbers (cat -n format, starting at 1).\n\n"
             "Usage:\n"
-            "* The path must be an absolute path.\n"
+            f"{cwd_line}"
             "* By default, reads up to 2000 lines from the beginning of the file.\n"
             "* You can specify offset and limit for long files, but reading the "
             "whole file is recommended when feasible.\n"

@@ -21,30 +21,38 @@ class DelegateTaskAction(Action):
 
     @property
     def name(self) -> str:
-        return "delegate_task"
+        return "use_agent"
 
     @property
     def description(self) -> str:
         return (
-            "Requests help from another agent in the system. The system matches "
-            "your task description against available agents' skills and returns "
-            "a list of candidates with pricing, along with your current token balance.\n\n"
+            "This tool provides access to specialist sub-agents. Sub-agents "
+            "start with a clean context window — fewer input tokens, more "
+            "focused on the sub-task than continuing in your own bloated context.\n\n"
+            "When to use this tool:\n"
+            "* When a sub-task is independent and self-contained, delegate it.\n"
+            "* When your context is already long (many file reads, tool results), "
+            "a fresh agent is more token-efficient.\n"
+            "* When the sub-task requires different expertise (e.g., writing tests "
+            "vs fixing code), spawn a specialist.\n"
+            "* Do NOT use if the next step depends on the result immediately "
+            "and cannot proceed in parallel.\n\n"
             "Usage:\n"
-            "* Provide a concise, specific task description. The system uses this "
-            "to find agents with relevant skills.\n"
-            "* You will receive your current balance and a candidate list with pricing. "
-            "Choose one, or choose to spawn a new agent, or choose not to delegate.\n"
-            "* Delegated tasks are executed in isolated sessions — the hired agent "
-            "cannot see your context.\n"
-            "* The hired agent will return results via `report_result`. Wait for "
-            "this before proceeding."
+            "* Use spawn to create new specialist agents: "
+            "spawn=[\"debugger\", \"test writer\"]\n"
+            "* Use agent_id to hire an existing agent from the market info "
+            "shown in your plan.\n"
+            "* Omit both to query available candidates.\n\n"
+            "Spawned agents are under your protection (cost charged to your balance). "
+            "Hired agents work in isolated sessions and return results via report_result."
         )
 
     @property
     def parameters(self) -> dict:
         return {
             "task_description": {"type": "string", "required": True},
-            "spawn": {"type": "boolean", "required": False},
+            "spawn": {"type": "array", "items": {"type": "string"}, "required": False},
+            "agent_id": {"type": "string", "required": False},
         }
 
     def _is_caller_protected(self) -> bool:
@@ -67,14 +75,21 @@ class DelegateTaskAction(Action):
         task_description = kwargs["task_description"]
         spawn = kwargs.get("spawn", False)
 
-        # Handle spawn request
-        if spawn and self._spawn_callback is not None:
+        # Backward compat: spawn=True treated as spawn=[task_description]
+        if spawn is True:
+            spawn = [task_description]
+
+        # Handle spawn request (list of specialist descriptions)
+        if isinstance(spawn, list) and spawn and self._spawn_callback is not None:
             # Protected agents cannot spawn new agents
             if self._is_caller_protected():
                 return "Protected agent cannot spawn new agents. Not allowed."
-            agent = self._spawn_callback(task_description)
-            agent_id = getattr(agent, "agent_id", None) or "new agent"
-            return f"Spawned agent {agent_id} for: {task_description}"
+            lines: list[str] = []
+            for desc in spawn:
+                agent = self._spawn_callback(desc)
+                aid = getattr(agent, "agent_id", None) or "new agent"
+                lines.append(f"Spawned agent {aid} for: {desc}")
+            return "\n".join(lines)
 
         candidates = self._find_candidates(task_description)
         lines: list[str] = []
@@ -91,6 +106,11 @@ class DelegateTaskAction(Action):
                     parts.append(f"price={price}")
                 if similarity is not None:
                     parts.append(f"match={similarity:.1f}")
+                # Label agents spawned by the caller as young agents
+                if self._calling_agent_id is not None:
+                    agent_obj = getattr(c, "agent", None)
+                    if agent_obj is not None and getattr(agent_obj, "protected_by", None) == self._calling_agent_id:
+                        parts.append("[幼年agent]")
                 lines.append(", ".join(parts))
 
         # Always offer spawn option when spawn_callback is available

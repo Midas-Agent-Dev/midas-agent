@@ -56,9 +56,12 @@ class GraphEmergenceWorkspace(Workspace):
         # bash, read_file, edit_file, write_file, search_code, find_files,
         # task_done, delegate_task
         cwd = self.work_dir or None
+        balance_provider = lambda: self._budget
         delegate = DelegateTaskAction(
             find_candidates=lambda desc: self._free_agent_manager.match(desc),
             spawn_callback=lambda desc: self._spawn_agent(desc),
+            balance_provider=balance_provider,
+            calling_agent_id=self._responsible_agent.agent_id,
         )
 
         actions = [
@@ -77,9 +80,28 @@ class GraphEmergenceWorkspace(Workspace):
             actions=actions,
             call_llm=self._call_llm,
             max_iterations=50,
-            market_info_provider=lambda: "budget info",
+            market_info_provider=lambda: self._build_market_info(),
+            balance_provider=balance_provider,
         )
         self._last_result = agent.run(context=issue.description)
+
+    def _build_market_info(self) -> str:
+        """Build market info for the planning phase. Data only — guidance
+        is in the system prompt."""
+        lines = [f"Your balance: {self._budget}"]
+
+        agents = self._free_agent_manager.free_agents
+        if agents:
+            lines.append("")
+            lines.append("Available agents:")
+            for agent_id, agent in agents.items():
+                price = self._free_agent_manager._pricing_engine.calculate_price(agent)
+                skill_name = agent.skill.name if agent.skill else "general"
+                protected = getattr(agent, "protected_by", None)
+                label = " [幼年agent]" if protected == self._responsible_agent.agent_id else ""
+                lines.append(f"  - {agent_id}: {skill_name} (price={price}){label}")
+
+        return "\n".join(lines)
 
     def _spawn_agent(self, task_description: str) -> Agent:
         """Spawn a new free agent with protection relationship."""

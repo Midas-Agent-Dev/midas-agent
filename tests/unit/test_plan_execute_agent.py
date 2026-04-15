@@ -70,3 +70,24 @@ class TestPlanExecuteAgent:
         )
         result = agent.run(context="Execute the plan step by step.")
         assert isinstance(result, AgentResult)
+
+    def test_accepts_balance_provider(self):
+        """PlanExecuteAgent constructor accepts balance_provider and propagates it to ReactAgent."""
+        agent = PlanExecuteAgent(
+            system_prompt="test",
+            actions=[],
+            call_llm=_dummy_call_llm,
+            balance_provider=lambda: 5000,
+        )
+        # balance_provider is stored on the ReactAgent base class
+        assert agent.balance_provider is not None
+        assert agent.balance_provider() == 5000
+
+    def test_balance_provider_defaults_to_none(self):
+        """When balance_provider is not passed, it defaults to None."""
+        agent = PlanExecuteAgent(
+            system_prompt="test",
+            actions=[],
+            call_llm=_dummy_call_llm,
+        )
+        assert agent.balance_provider is None

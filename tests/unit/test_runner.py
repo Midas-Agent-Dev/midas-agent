@@ -120,11 +120,11 @@ class TestRunInference:
             config_path = f.name
 
         try:
-            # budget=10 overrides budget_hint=100000; first call uses 100 tokens
-            # which exceeds budget, so second call in execution phase fails
+            # budget=0 overrides budget_hint=100000; first call is rejected
+            # immediately because consumed >= budget
             result = run_inference(
                 config_path, _make_issue(), provider, _make_action_registry(),
-                budget=10,
+                budget=0,
             )
             # Should return None because budget was exhausted
             assert result is None

@@ -664,3 +664,54 @@ class TestReactAgentIterationLimit:
         assert result.termination_reason == "done"
         assert result.iterations == 3
         assert result.output == "All done."
+
+
+# ---------------------------------------------------------------------------
+# Read_file path hallucination (Issue #2)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+class TestReadFilePathHallucination:
+    """The read_file tool description must include the actual working directory
+    (Option B) so the LLM can construct correct paths instead of hallucinating.
+    The description must also not mandate absolute paths.
+    """
+
+    def test_relative_path_reads_file_via_cwd(self, tmp_path):
+        """read_file with a relative path resolves against cwd and succeeds,
+        demonstrating the correct usage pattern."""
+        cwd = str(tmp_path / "repo")
+        os.makedirs(os.path.join(cwd, "astropy", "modeling"), exist_ok=True)
+        target = os.path.join(cwd, "astropy", "modeling", "separable.py")
+        with open(target, "w") as f:
+            f.write("# separable module\ndef is_separable():\n    pass\n")
+
+        action = ReadFileAction(cwd=cwd)
+
+        result = action.execute(path="./astropy/modeling/separable.py")
+
+        assert "File not found" not in result
+        assert "is_separable" in result
+
+    def test_tool_description_sent_to_llm_includes_cwd(self):
+        """The tool description exposed to the LLM via _build_tools() must
+        contain the actual cwd so the model knows where files are."""
+        cwd = "/var/midas/ws-0/astropy__astropy-12907"
+        action = ReadFileAction(cwd=cwd)
+
+        agent = ReactAgent(
+            system_prompt="test",
+            actions=[action],
+            call_llm=lambda r: _text_response("ok"),
+        )
+
+        tools = agent._build_tools()
+        read_file_tool = [t for t in tools if t["function"]["name"] == "read_file"]
+        assert len(read_file_tool) == 1
+
+        desc = read_file_tool[0]["function"]["description"]
+        assert cwd in desc, \
+            f"Tool description must include cwd '{cwd}': {desc}"
+        assert "must be an absolute path" not in desc.lower(), \
+            f"Tool description should not mandate absolute paths: {desc}"

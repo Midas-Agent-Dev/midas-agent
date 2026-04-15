@@ -116,9 +116,8 @@ def _make_issue() -> Issue:
 
 @pytest.mark.integration
 class TestIT61PlanExecuteBasicFlow:
-    """PlanExecuteAgent completes a plan-then-execute cycle driven by
-    scripted FakeLLM responses. The market_info_provider is invoked during
-    the planning phase."""
+    """PlanExecuteAgent completes with market_info injected into the
+    initial user message. Tools are available from the first LLM call."""
 
     def test_plan_execute_agent_completes(self):
         market_info_called = False
@@ -128,13 +127,8 @@ class TestIT61PlanExecuteBasicFlow:
             market_info_called = True
             return "budget=5000, free_agents=3"
 
-        # Response sequence: plan text -> tool call (task_done) -> done
+        # LLM issues a task_done tool call on first response
         responses = [
-            # Planning phase: LLM returns a plan as text
-            _make_response(
-                content="Plan: 1) Read the file 2) Fix the bug 3) Submit",
-            ),
-            # Execution phase: LLM issues a task_done tool call
             _make_response(
                 content=None,
                 tool_calls=[
@@ -156,7 +150,7 @@ class TestIT61PlanExecuteBasicFlow:
             return responses[idx] if idx < len(responses) else responses[-1]
 
         agent = PlanExecuteAgent(
-            system_prompt="You are the workspace lead. Plan then execute.",
+            system_prompt="You are the workspace lead.",
             actions=[TaskDoneAction()],
             call_llm=scripted_call_llm,
             max_iterations=10,
@@ -170,11 +164,11 @@ class TestIT61PlanExecuteBasicFlow:
         assert result.termination_reason == "done"
         assert result.output is not None
 
-        # market_info_provider was invoked during the planning phase
+        # market_info_provider was invoked to build the initial message
         assert market_info_called is True
 
-        # At least 2 LLM calls: one for plan, one for execute
-        assert call_index >= 2
+        # At least 1 LLM call
+        assert call_index >= 1
 
 
 # ---------------------------------------------------------------------------
@@ -757,10 +751,10 @@ class TestIT612SpawnCreatesProtectedAgent:
             spawn_callback=spawn_callback,
         )
 
-        # Simulate LLM choosing spawn (execute with spawn=True)
+        # Simulate LLM choosing spawn (batch spawn with one specialist)
         output = delegate.execute(
             task_description="fix parsing bug",
-            spawn=True,
+            spawn=["parsing specialist"],
         )
 
         assert len(spawned_agents) == 1
@@ -836,8 +830,8 @@ class TestIT614SpawnExecuteReportCycle:
         )
         report_action = ReportResultAction(report=report_callback)
 
-        # Step 1: Spawn via delegate_task
-        delegate.execute(task_description="write unit test", spawn=True)
+        # Step 1: Spawn via delegate_task (batch with one specialist)
+        delegate.execute(task_description="write unit test", spawn=["unit test writer"])
         assert len(spawned) == 1
 
         # Step 2: Spawned agent is now in the pool
@@ -906,14 +900,13 @@ class TestIT616WorkspaceSpawnDuringExecute:
 
         responsible_agent = _make_agent("lead-1", agent_type="workspace_bound")
 
-        # Script LLM: plan → delegate_task(spawn=True) → task_done
-        plan_response = _make_response(content="Plan: delegate to a specialist.")
+        # Script LLM: use_agent(spawn=[...]) → task_done
         spawn_response = _make_response(
             tool_calls=[
                 ToolCall(
                     id="call_1",
-                    name="delegate_task",
-                    arguments={"task_description": "analyze separability", "spawn": True},
+                    name="use_agent",
+                    arguments={"task_description": "analyze separability", "spawn": ["separability specialist"]},
                 )
             ],
         )
@@ -924,7 +917,7 @@ class TestIT616WorkspaceSpawnDuringExecute:
         )
 
         provider = FakeLLMProvider(
-            responses=[plan_response, spawn_response, done_response],
+            responses=[spawn_response, done_response],
         )
 
         ws = GraphEmergenceWorkspace(
@@ -988,7 +981,7 @@ class TestIT617FreeAgentSpawnsAnother:
             spawn_callback=spawn_callback,
         )
 
-        output = delegate.execute(task_description="write tests", spawn=True)
+        output = delegate.execute(task_description="write tests", spawn=["test writer"])
 
         assert len(spawned) == 1
         assert spawned[0].protected_by == "indie-1"
@@ -1037,7 +1030,7 @@ class TestIT618ProtectedAgentCannotSpawn:
             calling_agent_id="protected-1",
         )
 
-        output = delegate.execute(task_description="do something", spawn=True)
+        output = delegate.execute(task_description="do something", spawn=["helper"])
 
         # Spawn should be rejected for protected agents
         assert not spawn_called
@@ -1074,3 +1067,435 @@ class TestIT619BalanceInDelegateOutput:
         assert "expert-1" in output
         assert "45000" in output
         assert "spawn" in output.lower()
+
+
+# ---------------------------------------------------------------------------
+# IT-6.20: Balance provider wired through GraphEmergenceWorkspace.execute()
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+class TestIT620BalanceProviderWiredInExecute:
+    """GraphEmergenceWorkspace.execute() must wire balance_provider into both
+    PlanExecuteAgent and DelegateTaskAction, so that:
+    1. Tool results include [当前余额: N] after every tool call
+    2. delegate_task output includes [你的余额: N]
+
+    Uses scripted LLM: plan → delegate_task → task_done.
+    Captures the messages sent to the LLM to verify balance injection.
+    """
+
+    def test_balance_injected_in_tool_results(self):
+        training_log, storage, spy_hooks = _make_log()
+        pricing_engine = PricingEngine(training_log=training_log)
+        free_agent_manager = FreeAgentManager(pricing_engine=pricing_engine)
+        skill_reviewer = MagicMock(spec=SkillReviewer)
+
+        # Register a free agent so delegate_task returns candidates
+        free_agent_manager.register(
+            _make_free_agent("expert-1", skill=_make_skill("debugging"))
+        )
+
+        responsible_agent = _make_agent("lead-1", agent_type="workspace_bound")
+
+        # Script: use_agent (no spawn) → task_done
+        delegate_response = _make_response(
+            tool_calls=[
+                ToolCall(
+                    id="call_1",
+                    name="use_agent",
+                    arguments={"task_description": "fix parsing"},
+                )
+            ],
+        )
+        done_response = _make_response(
+            tool_calls=[
+                ToolCall(id="call_2", name="task_done", arguments={}),
+            ],
+        )
+
+        captured_messages: list[list[dict]] = []
+
+        call_index = 0
+        responses = [delegate_response, done_response]
+
+        def capturing_call_llm(request: LLMRequest) -> LLMResponse:
+            nonlocal call_index
+            captured_messages.append(list(request.messages))
+            idx = call_index
+            call_index += 1
+            return responses[idx] if idx < len(responses) else responses[-1]
+
+        ws = GraphEmergenceWorkspace(
+            workspace_id="ws-ge-1",
+            responsible_agent=responsible_agent,
+            call_llm=capturing_call_llm,
+            system_llm=MagicMock(return_value=_make_response()),
+            free_agent_manager=free_agent_manager,
+            skill_reviewer=skill_reviewer,
+        )
+        ws.receive_budget(50000)
+
+        issue = _make_issue()
+        ws.execute(issue)
+
+        # The 3rd LLM call (after delegate_task tool result) should contain
+        # the tool result message with balance injected.
+        # Find tool messages across all captured LLM calls.
+        all_tool_msgs = []
+        for msgs in captured_messages:
+            for m in msgs:
+                if m.get("role") == "tool":
+                    all_tool_msgs.append(m)
+
+        assert len(all_tool_msgs) >= 1, \
+            "Expected at least one tool result message"
+
+        # The delegate_task tool result should contain the balance
+        delegate_tool_msg = all_tool_msgs[0]
+        assert "当前余额" in delegate_tool_msg["content"] or \
+               "50000" in delegate_tool_msg["content"], \
+            f"Tool result should contain balance info: {delegate_tool_msg['content']}"
+
+    def test_delegate_output_includes_balance(self):
+        """delegate_task output itself must include the workspace's balance
+        via the balance_provider wired by execute()."""
+        training_log, storage, spy_hooks = _make_log()
+        pricing_engine = PricingEngine(training_log=training_log)
+        free_agent_manager = FreeAgentManager(pricing_engine=pricing_engine)
+        skill_reviewer = MagicMock(spec=SkillReviewer)
+
+        free_agent_manager.register(
+            _make_free_agent("expert-1", skill=_make_skill("debugging"))
+        )
+
+        responsible_agent = _make_agent("lead-1", agent_type="workspace_bound")
+
+        # Script: use_agent → task_done
+        delegate_response = _make_response(
+            tool_calls=[
+                ToolCall(
+                    id="call_1",
+                    name="use_agent",
+                    arguments={"task_description": "fix bug"},
+                )
+            ],
+        )
+        done_response = _make_response(
+            tool_calls=[
+                ToolCall(id="call_2", name="task_done", arguments={}),
+            ],
+        )
+
+        captured_messages: list[list[dict]] = []
+        call_index = 0
+        responses = [delegate_response, done_response]
+
+        def capturing_call_llm(request: LLMRequest) -> LLMResponse:
+            nonlocal call_index
+            captured_messages.append(list(request.messages))
+            idx = call_index
+            call_index += 1
+            return responses[idx] if idx < len(responses) else responses[-1]
+
+        ws = GraphEmergenceWorkspace(
+            workspace_id="ws-ge-1",
+            responsible_agent=responsible_agent,
+            call_llm=capturing_call_llm,
+            system_llm=MagicMock(return_value=_make_response()),
+            free_agent_manager=free_agent_manager,
+            skill_reviewer=skill_reviewer,
+        )
+        ws.receive_budget(30000)
+
+        ws.execute(_make_issue())
+
+        # Find the delegate_task tool result
+        all_tool_msgs = []
+        for msgs in captured_messages:
+            for m in msgs:
+                if m.get("role") == "tool":
+                    all_tool_msgs.append(m)
+
+        assert len(all_tool_msgs) >= 1
+        delegate_result = all_tool_msgs[0]["content"]
+
+        # The delegate_task action itself should include balance via balance_provider
+        assert "30000" in delegate_result, \
+            f"delegate_task output should include workspace balance 30000: {delegate_result}"
+
+
+# ---------------------------------------------------------------------------
+# IT-6.21: market_info_provider returns real data in planning phase
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+class TestIT621MarketInfoProviderReturnsRealData:
+    """During the planning phase, market_info_provider must return real
+    information (current balance, pool size) instead of hardcoded 'budget info'.
+    This allows the agent to make informed planning decisions."""
+
+    def test_market_info_contains_balance_and_pool_size(self):
+        training_log, storage, spy_hooks = _make_log()
+        pricing_engine = PricingEngine(training_log=training_log)
+        free_agent_manager = FreeAgentManager(pricing_engine=pricing_engine)
+        skill_reviewer = MagicMock(spec=SkillReviewer)
+
+        # Register 2 free agents
+        free_agent_manager.register(
+            _make_free_agent("expert-1", skill=_make_skill("debugging"))
+        )
+        free_agent_manager.register(
+            _make_free_agent("expert-2", skill=_make_skill("testing"))
+        )
+
+        responsible_agent = _make_agent("lead-1", agent_type="workspace_bound")
+
+        # Script: text response (done)
+        done_response = _make_response(content="Done.")
+
+        captured_messages: list[list[dict]] = []
+        call_index = 0
+        responses = [done_response]
+
+        def capturing_call_llm(request: LLMRequest) -> LLMResponse:
+            nonlocal call_index
+            captured_messages.append(list(request.messages))
+            idx = call_index
+            call_index += 1
+            return responses[idx] if idx < len(responses) else responses[-1]
+
+        ws = GraphEmergenceWorkspace(
+            workspace_id="ws-ge-1",
+            responsible_agent=responsible_agent,
+            call_llm=capturing_call_llm,
+            system_llm=MagicMock(return_value=_make_response()),
+            free_agent_manager=free_agent_manager,
+            skill_reviewer=skill_reviewer,
+        )
+        ws.receive_budget(25000)
+
+        ws.execute(_make_issue())
+
+        # The first LLM call should contain market info in the user message.
+        first_call_msgs = captured_messages[0]
+        user_msgs = [m for m in first_call_msgs if m.get("role") == "user"]
+        assert len(user_msgs) >= 1
+
+        user_prompt = user_msgs[0]["content"]
+        # Must contain balance (real data, not placeholder)
+        assert "25000" in user_prompt, \
+            f"User message must contain balance: {user_prompt}"
+        assert "budget info" not in user_prompt.lower(), \
+            f"Must not contain hardcoded 'budget info': {user_prompt}"
+
+
+# ---------------------------------------------------------------------------
+# IT-6.21b: Planning phase prompt lists agents with prices
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+class TestIT621bPlanningPhaseListsAgents:
+    """During the planning phase, market_info must list available agents
+    with their IDs and prices so the LLM can decide whether to delegate
+    during planning — not wait until it calls delegate_task."""
+
+    def test_planning_prompt_contains_agent_list(self):
+        training_log, storage, spy_hooks = _make_log()
+        pricing_engine = PricingEngine(training_log=training_log)
+        free_agent_manager = FreeAgentManager(pricing_engine=pricing_engine)
+        skill_reviewer = MagicMock(spec=SkillReviewer)
+
+        # Register agents with skills
+        free_agent_manager.register(
+            _make_free_agent("debugger-1", skill=_make_skill("debugging"))
+        )
+        free_agent_manager.register(
+            _make_free_agent("tester-1", skill=_make_skill("testing"))
+        )
+
+        responsible_agent = _make_agent("lead-1", agent_type="workspace_bound")
+
+        # Script: text done
+        responses = [
+            _make_response(content="Done."),
+        ]
+        captured_messages: list[list[dict]] = []
+        call_index = 0
+
+        def capturing_call_llm(request: LLMRequest) -> LLMResponse:
+            nonlocal call_index
+            captured_messages.append(list(request.messages))
+            idx = call_index
+            call_index += 1
+            return responses[idx] if idx < len(responses) else responses[-1]
+
+        ws = GraphEmergenceWorkspace(
+            workspace_id="ws-ge-1",
+            responsible_agent=responsible_agent,
+            call_llm=capturing_call_llm,
+            system_llm=MagicMock(return_value=_make_response()),
+            free_agent_manager=free_agent_manager,
+            skill_reviewer=skill_reviewer,
+        )
+        ws.receive_budget(50000)
+        ws.execute(_make_issue())
+
+        # The planning prompt (first LLM call, user message) must contain
+        # the agent IDs and their prices
+        first_call_msgs = captured_messages[0]
+        user_msgs = [m for m in first_call_msgs if m.get("role") == "user"]
+        planning_prompt = user_msgs[0]["content"]
+
+        assert "debugger-1" in planning_prompt, \
+            f"Planning prompt must list agent IDs: {planning_prompt}"
+        assert "tester-1" in planning_prompt, \
+            f"Planning prompt must list agent IDs: {planning_prompt}"
+
+        # Prices should be present (default price for no-history agent = 120)
+        price_debugger = pricing_engine.calculate_price(
+            free_agent_manager.free_agents["debugger-1"]
+        )
+        assert str(price_debugger) in planning_prompt, \
+            f"Planning prompt must include prices: {planning_prompt}"
+
+
+# ---------------------------------------------------------------------------
+# IT-6.22: delegate_task labels 幼年agent in candidate output
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+class TestIT622YoungAgentLabeling:
+    """When the responsible agent calls delegate_task and the candidate list
+    includes agents it previously spawned (protected_by == calling_agent_id),
+    those agents must be labeled as 幼年agent in the output. Independent
+    agents must NOT be labeled as 幼年agent."""
+
+    def test_mixed_candidates_labeled_correctly(self):
+        training_log, storage, spy_hooks = _make_log()
+        pricing_engine = PricingEngine(training_log=training_log)
+        free_agent_manager = FreeAgentManager(pricing_engine=pricing_engine)
+
+        # Register a young agent (spawned by lead-1)
+        young = Agent(
+            agent_id="spawned-worker",
+            soul=Soul(system_prompt="specialist"),
+            agent_type="free",
+            skill=_make_skill("parsing"),
+            protected_by="lead-1",
+        )
+        free_agent_manager.register(young)
+
+        # Register an independent agent
+        independent = _make_free_agent(
+            "veteran-1", skill=_make_skill("debugging"),
+        )
+        free_agent_manager.register(independent)
+
+        delegate = DelegateTaskAction(
+            find_candidates=lambda desc: free_agent_manager.match(desc),
+            spawn_callback=lambda desc: None,
+            balance_provider=lambda: 40000,
+            calling_agent_id="lead-1",
+        )
+
+        output = delegate.execute(task_description="fix parser bug")
+
+        # Both agents appear
+        assert "spawned-worker" in output
+        assert "veteran-1" in output
+
+        # Young agent line has 幼年 label
+        for line in output.split("\n"):
+            if "spawned-worker" in line:
+                assert "幼年" in line, \
+                    f"Protected agent should be labeled 幼年: {line}"
+            if "veteran-1" in line:
+                assert "幼年" not in line, \
+                    f"Independent agent should NOT be labeled 幼年: {line}"
+
+
+# ---------------------------------------------------------------------------
+# IT-6.23: Workspace passes calling_agent_id through execute()
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+class TestIT623CallingAgentIdWired:
+    """GraphEmergenceWorkspace.execute() must pass the responsible agent's
+    id as calling_agent_id to DelegateTaskAction, so that 幼年agent labeling
+    works during real execution."""
+
+    def test_delegate_knows_caller_during_execute(self):
+        training_log, storage, spy_hooks = _make_log()
+        pricing_engine = PricingEngine(training_log=training_log)
+        free_agent_manager = FreeAgentManager(pricing_engine=pricing_engine)
+        skill_reviewer = MagicMock(spec=SkillReviewer)
+
+        # Pre-register a young agent that lead-1 "spawned" in a prior episode
+        young = Agent(
+            agent_id="prior-spawn",
+            soul=Soul(system_prompt="specialist"),
+            agent_type="free",
+            skill=_make_skill("parsing"),
+            protected_by="lead-1",
+        )
+        free_agent_manager.register(young)
+
+        responsible_agent = _make_agent("lead-1", agent_type="workspace_bound")
+
+        # Script: use_agent → task_done
+        delegate_response = _make_response(
+            tool_calls=[
+                ToolCall(
+                    id="call_1",
+                    name="use_agent",
+                    arguments={"task_description": "parse the file"},
+                )
+            ],
+        )
+        done_response = _make_response(
+            tool_calls=[
+                ToolCall(id="call_2", name="task_done", arguments={}),
+            ],
+        )
+
+        captured_messages: list[list[dict]] = []
+        call_index = 0
+        responses = [delegate_response, done_response]
+
+        def capturing_call_llm(request: LLMRequest) -> LLMResponse:
+            nonlocal call_index
+            captured_messages.append(list(request.messages))
+            idx = call_index
+            call_index += 1
+            return responses[idx] if idx < len(responses) else responses[-1]
+
+        ws = GraphEmergenceWorkspace(
+            workspace_id="ws-ge-1",
+            responsible_agent=responsible_agent,
+            call_llm=capturing_call_llm,
+            system_llm=MagicMock(return_value=_make_response()),
+            free_agent_manager=free_agent_manager,
+            skill_reviewer=skill_reviewer,
+        )
+        ws.receive_budget(50000)
+        ws.execute(_make_issue())
+
+        # Find the delegate_task tool result in captured messages
+        all_tool_msgs = []
+        for msgs in captured_messages:
+            for m in msgs:
+                if m.get("role") == "tool":
+                    all_tool_msgs.append(m)
+
+        assert len(all_tool_msgs) >= 1
+        delegate_result = all_tool_msgs[0]["content"]
+
+        # The prior-spawn agent should be labeled 幼年
+        assert "prior-spawn" in delegate_result
+        assert "幼年" in delegate_result, \
+            f"delegate output should label protected agent as 幼年: {delegate_result}"
