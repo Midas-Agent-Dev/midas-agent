@@ -279,4 +279,103 @@ def run_training(
             shutil.rmtree(repo_dir, ignore_errors=True)
             shutil.rmtree(repo_dir + "_workspaces", ignore_errors=True)
 
+    # -- Export training artifacts --
+    _export_artifacts(config, scheduler)
+
     logger.info("Training complete. %d episodes.", len(issues))
+
+
+def _export_artifacts(config: MidasConfig, scheduler: Scheduler) -> None:
+    """Export training artifacts to disk after training completes."""
+    try:
+        _do_export(config, scheduler)
+    except Exception as e:
+        logger.debug("Export skipped: %s", e)
+
+
+def _do_export(config: MidasConfig, scheduler: Scheduler) -> None:
+    import os
+
+    output_dir = "/tmp/midas_output"
+    os.makedirs(output_dir, exist_ok=True)
+
+    workspaces = scheduler.get_workspaces()
+    if not workspaces:
+        return
+
+    if config.runtime_mode == "graph_emergence":
+        from midas_agent.inference.schemas import (
+            FreeAgentSchema,
+            GraphEmergenceArtifact,
+            ResponsibleAgentSchema,
+            SkillSchema,
+            SoulSchema,
+        )
+
+        # Pick the first workspace's responsible agent (in a full implementation
+        # we'd pick the highest-eta one).
+        ws = workspaces[0]
+        resp_agent = getattr(ws, "_responsible_agent", None)
+        if resp_agent is None:
+            return
+
+        fa_manager = getattr(ws, "_free_agent_manager", None)
+        free_agents_schemas = []
+        if fa_manager:
+            for agent_id, agent in fa_manager.free_agents.items():
+                skill_schema = None
+                if agent.skill:
+                    skill_schema = SkillSchema(
+                        name=agent.skill.name,
+                        description=agent.skill.description,
+                        content=agent.skill.content,
+                    )
+                price = fa_manager._pricing_engine.calculate_price(agent)
+                free_agents_schemas.append(FreeAgentSchema(
+                    agent_id=agent.agent_id,
+                    soul=SoulSchema(system_prompt=agent.soul.system_prompt),
+                    skill=skill_schema,
+                    price=price,
+                    bankruptcy_rate=0.0,
+                ))
+
+        resp_skill = None
+        if resp_agent.skill:
+            resp_skill = SkillSchema(
+                name=resp_agent.skill.name,
+                description=resp_agent.skill.description,
+                content=resp_agent.skill.content,
+            )
+
+        artifact = GraphEmergenceArtifact(
+            responsible_agent=ResponsibleAgentSchema(
+                soul=SoulSchema(system_prompt=resp_agent.soul.system_prompt),
+                skill=resp_skill,
+            ),
+            free_agents=free_agents_schemas,
+            budget_hint=config.initial_budget,
+        )
+
+        output_path = os.path.join(output_dir, "graph_emergence_artifact.json")
+        with open(output_path, "w") as f:
+            f.write(artifact.model_dump_json(indent=2))
+        logger.info("Exported Graph Emergence artifact to %s", output_path)
+
+    else:
+        # Config Evolution: export best config from snapshot store.
+        from midas_agent.workspace.config_evolution.snapshot_store import SnapshotFilter
+
+        ws = workspaces[0]
+        snapshot_store = getattr(ws, "_snapshot_store", None)
+        if snapshot_store is None:
+            return
+
+        snapshots = snapshot_store.query(SnapshotFilter(top_k=1))
+        if not snapshots:
+            logger.info("No snapshots to export.")
+            return
+
+        output_path = os.path.join(output_dir, "best_config.yaml")
+        with open(output_path, "w") as f:
+            f.write(snapshots[0].config_yaml)
+        logger.info("Exported best config (η=%.4f) to %s", snapshots[0].eta, output_path)

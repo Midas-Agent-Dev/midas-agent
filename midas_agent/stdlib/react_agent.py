@@ -1,12 +1,15 @@
 """ReactAgent — ReAct loop implementation."""
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass, field
 from typing import Callable
 
 from midas_agent.llm.types import LLMRequest, LLMResponse
 from midas_agent.stdlib.action import Action
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -82,7 +85,14 @@ class ReactAgent:
 
                 for tool_call in response.tool_calls:
                     action = self._actions_by_name[tool_call.name]
+                    logger.info(
+                        "  [iter %d] %s(%s)",
+                        iterations,
+                        tool_call.name,
+                        ", ".join(f"{k}={repr(v)[:80]}" for k, v in tool_call.arguments.items()),
+                    )
                     result = action.execute(**tool_call.arguments)
+                    logger.info("    → %s", result[:200] if result else "(empty)")
 
                     record = ActionRecord(
                         action_name=tool_call.name,
@@ -101,6 +111,7 @@ class ReactAgent:
 
                     # Check for task_done action
                     if tool_call.name == "task_done":
+                        logger.info("  Task done.")
                         return AgentResult(
                             output=result,
                             iterations=iterations,
@@ -108,6 +119,7 @@ class ReactAgent:
                             action_history=action_history,
                         )
             elif response.content:
+                logger.info("  [iter %d] Response: %s", iterations, response.content[:200])
                 return AgentResult(
                     output=response.content,
                     iterations=iterations,

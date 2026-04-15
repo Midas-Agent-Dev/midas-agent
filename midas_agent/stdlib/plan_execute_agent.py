@@ -1,8 +1,11 @@
 """PlanExecuteAgent — Plan then Execute two-phase agent."""
 from __future__ import annotations
 
+import logging
 import time
 from typing import Callable
+
+logger = logging.getLogger(__name__)
 
 from midas_agent.llm.types import LLMRequest, LLMResponse
 from midas_agent.stdlib.action import Action
@@ -55,6 +58,7 @@ class PlanExecuteAgent(ReactAgent):
 
         iterations += 1
         plan_text = plan_response.content or ""
+        logger.info("  [Plan] %s", plan_text[:500])
 
         # Add plan to conversation as assistant response
         messages.append({"role": "assistant", "content": plan_text})
