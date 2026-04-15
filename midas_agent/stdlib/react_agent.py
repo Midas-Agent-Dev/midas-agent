@@ -36,12 +36,14 @@ class ReactAgent:
         call_llm: Callable[[LLMRequest], LLMResponse],
         max_iterations: int | None = None,
         balance_provider: Callable[[], int] | None = None,
+        max_tool_output_chars: int | None = None,
     ) -> None:
         self.system_prompt = system_prompt
         self.actions = actions
         self.call_llm = call_llm
         self.max_iterations = max_iterations
         self.balance_provider = balance_provider
+        self.max_tool_output_chars = max_tool_output_chars
         self._actions_by_name: dict[str, Action] = {a.name: a for a in actions}
 
     def _build_tools(self) -> list[dict] | None:
@@ -135,6 +137,11 @@ class ReactAgent:
                     )
                     result = action.execute(**tool_call.arguments)
                     logger.info("    → %s", result[:200] if result else "(empty)")
+
+                    # Truncate large tool output before it enters conversation history
+                    if self.max_tool_output_chars is not None and result and len(result) > self.max_tool_output_chars:
+                        from midas_agent.context.truncation import truncate_output
+                        result = truncate_output(result, max_chars=self.max_tool_output_chars)
 
                     record = ActionRecord(
                         action_name=tool_call.name,

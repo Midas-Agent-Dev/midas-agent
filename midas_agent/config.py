@@ -29,3 +29,6 @@ class MidasConfig:
     # Execution environment: "local" = current behavior,
     # "docker" = bash commands run inside SWE-bench Docker container
     execution_env: str = "local"
+    # Context management
+    max_tool_output_chars: int = 10000
+    max_context_tokens: int = 262144
