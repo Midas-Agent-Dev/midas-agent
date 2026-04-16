@@ -131,10 +131,12 @@ class GraphEmergenceWorkspace(Workspace):
     def submit_patch(self) -> None:
         self.calls.append(("submit_patch", {}))
 
+        patch_content = self._generate_patch()
+        self._last_patch = patch_content
+
         patches_dir = os.path.join(self._patches_dir, self.workspace_id)
         os.makedirs(patches_dir, exist_ok=True)
 
-        patch_content = self._generate_patch()
         episode_id = uuid.uuid4().hex[:8]
         patch_path = os.path.join(patches_dir, f"{episode_id}.patch")
         with open(patch_path, "w") as f:

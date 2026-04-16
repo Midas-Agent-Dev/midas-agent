@@ -95,10 +95,11 @@ class TestConfigEvolutionWorkspace:
         dag_executor.execute.assert_called_once()
 
     def test_submit_patch(self):
-        """submit_patch() persists the generated patch."""
+        """submit_patch() sets _last_patch on the workspace."""
         ws = self._make_workspace()
 
         ws.submit_patch()  # Should not raise
+        assert hasattr(ws, "_last_patch")
 
     def test_post_episode_evicted_returns_new_config(self):
         """An evicted workspace returns a new config dict from post_episode().

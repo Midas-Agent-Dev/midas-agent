@@ -17,6 +17,7 @@ class Workspace(ABC):
         self.calls: list[tuple[str, dict]] = []
         self.budget_received: int = 0
         self.work_dir: str = ""
+        self._last_patch: str = ""
 
     @abstractmethod
     def receive_budget(self, amount: int) -> None:

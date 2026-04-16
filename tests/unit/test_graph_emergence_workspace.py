@@ -77,13 +77,14 @@ class TestGraphEmergenceWorkspace:
         ws.execute(issue)  # Should not raise; internally starts PlanExecuteAgent
 
     def test_submit_patch(self):
-        """submit_patch() persists the generated patch."""
+        """submit_patch() sets _last_patch on the workspace."""
         ws = self._make_workspace()
 
         ws.submit_patch()  # Should not raise
+        assert hasattr(ws, "_last_patch")
 
     def test_submit_patch_writes_git_diff(self, tmp_path):
-        """submit_patch() writes git diff from work_dir to patches directory."""
+        """submit_patch() stores git diff in _last_patch and writes to disk."""
         import subprocess
 
         # Set up a git repo with a change
@@ -104,7 +105,11 @@ class TestGraphEmergenceWorkspace:
 
         ws.submit_patch()
 
-        # Should have written a .patch file with the diff
+        # _last_patch must contain the diff content
+        assert "original" in ws._last_patch
+        assert "modified" in ws._last_patch
+
+        # Audit file should also be written
         ws_patches = patches_dir / "ws-ge-1"
         assert ws_patches.is_dir()
         patch_files = list(ws_patches.glob("*.patch"))
@@ -114,7 +119,7 @@ class TestGraphEmergenceWorkspace:
         assert "modified" in content
 
     def test_submit_patch_empty_diff(self, tmp_path):
-        """submit_patch() writes empty patch when no changes in work_dir."""
+        """submit_patch() sets _last_patch to empty string when no changes."""
         import subprocess
 
         repo = tmp_path / "repo"
@@ -133,10 +138,7 @@ class TestGraphEmergenceWorkspace:
 
         ws.submit_patch()
 
-        ws_patches = patches_dir / "ws-ge-1"
-        patch_files = list(ws_patches.glob("*.patch"))
-        assert len(patch_files) == 1
-        assert patch_files[0].read_text() == ""
+        assert ws._last_patch == ""
 
     def test_post_episode_returns_none(self):
         """post_episode() always returns None for GraphEmergenceWorkspace (no config evolution)."""

@@ -51,6 +51,10 @@ class ConfigEvolutionWorkspace(Workspace):
 
     def submit_patch(self) -> None:
         self.calls.append(("submit_patch", {}))
+
+        patch_content = self._generate_patch()
+        self._last_patch = patch_content
+
         # Derive patches directory from the snapshot store's store_dir.
         # snapshot_store.store_dir is typically "{base}/snapshots", so
         # patches go to "{base}/patches/{workspace_id}/".
@@ -62,8 +66,6 @@ class ConfigEvolutionWorkspace(Workspace):
             os.path.dirname(store_dir), "patches", self.workspace_id,
         )
         os.makedirs(patches_dir, exist_ok=True)
-
-        patch_content = self._generate_patch()
 
         episode_id = uuid.uuid4().hex[:8]
         patch_path = os.path.join(patches_dir, f"{episode_id}.patch")

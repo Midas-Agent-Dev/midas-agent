@@ -256,6 +256,7 @@ class StubWorkspace(Workspace):
 
     def submit_patch(self) -> None:
         self.calls.append(("submit_patch", {}))
+        self._last_patch = self._patch_content
 
     def post_episode(self, eval_results: dict, evicted_ids: list[str]) -> dict | None:
         self.calls.append(("post_episode", {"eval_results": eval_results, "evicted_ids": evicted_ids}))

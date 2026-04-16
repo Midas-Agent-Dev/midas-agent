@@ -127,23 +127,9 @@ def clone_repo(repo: str, base_commit: str, dest: str) -> None:
         )
 
 
-def collect_patches(workspaces, patches_base_dir: str) -> dict[str, str]:
-    """Read patch files written by submit_patch() from disk."""
-    patches: dict[str, str] = {}
-    for ws in workspaces:
-        ws_patches_dir = os.path.join(patches_base_dir, ws.workspace_id)
-        if not os.path.isdir(ws_patches_dir):
-            patches[ws.workspace_id] = ""
-            continue
-        # Get the most recent patch file.
-        patch_files = sorted(os.listdir(ws_patches_dir))
-        if not patch_files:
-            patches[ws.workspace_id] = ""
-            continue
-        latest = os.path.join(ws_patches_dir, patch_files[-1])
-        with open(latest) as f:
-            patches[ws.workspace_id] = f.read()
-    return patches
+def collect_patches(workspaces, patches_base_dir: str = "") -> dict[str, str]:
+    """Read patches from workspace objects (authoritative source)."""
+    return {ws.workspace_id: ws._last_patch for ws in workspaces}
 
 
 def run_training(

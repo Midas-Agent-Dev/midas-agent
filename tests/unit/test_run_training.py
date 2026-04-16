@@ -106,29 +106,29 @@ class TestRunTraining:
 
 @pytest.mark.unit
 class TestCollectPatches:
-    def test_collect_empty_dir(self, tmp_path):
+    def test_collect_empty_patch(self):
         ws = MagicMock()
         ws.workspace_id = "ws-0"
-        patches = collect_patches([ws], str(tmp_path))
+        ws._last_patch = ""
+        patches = collect_patches([ws])
         assert patches == {"ws-0": ""}
 
-    def test_collect_existing_patch(self, tmp_path):
-        ws_dir = tmp_path / "ws-0"
-        ws_dir.mkdir()
-        (ws_dir / "ep1.patch").write_text("diff --git a/foo")
-
+    def test_collect_existing_patch(self):
         ws = MagicMock()
         ws.workspace_id = "ws-0"
-        patches = collect_patches([ws], str(tmp_path))
+        ws._last_patch = "diff --git a/foo"
+        patches = collect_patches([ws])
         assert patches["ws-0"] == "diff --git a/foo"
 
-    def test_collect_latest_patch(self, tmp_path):
+    def test_collect_reads_from_workspace_not_disk(self, tmp_path):
+        """collect_patches reads from _last_patch, not from disk."""
+        # Write a stale patch to disk to prove it is NOT read
         ws_dir = tmp_path / "ws-0"
         ws_dir.mkdir()
-        (ws_dir / "ep1.patch").write_text("old")
-        (ws_dir / "ep2.patch").write_text("new")
+        (ws_dir / "stale.patch").write_text("stale content")
 
         ws = MagicMock()
         ws.workspace_id = "ws-0"
+        ws._last_patch = "fresh content"
         patches = collect_patches([ws], str(tmp_path))
-        assert patches["ws-0"] == "new"
+        assert patches["ws-0"] == "fresh content"
