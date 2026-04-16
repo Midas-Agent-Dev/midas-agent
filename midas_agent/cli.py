@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import argparse
+import os
+import sys
 
 from midas_agent.stdlib.action import Action
 
@@ -19,6 +21,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--output",
         default=".midas/agents/",
         help="Output directory for artifacts (default: .midas/agents/)",
+    )
+    train_parser.add_argument(
+        "--issues",
+        type=int,
+        default=None,
+        help="Number of issues to train on (default: all)",
     )
 
     # -- infer subcommand --
@@ -82,6 +90,93 @@ def build_action_set(cwd: str, env: str = "local") -> list[Action]:
     ]
 
 
+def _cmd_train(args: argparse.Namespace) -> None:
+    """Execute the train subcommand."""
+    from midas_agent.resolver import ConfigurationError, resolve_llm_config
+
+    try:
+        llm_config = resolve_llm_config(cli_model=None, cli_api_key=None)
+    except ConfigurationError as e:
+        print(str(e))
+        sys.exit(1)
+
+    # Load training config from YAML
+    import yaml
+
+    with open(args.config) as f:
+        raw = yaml.safe_load(f) or {}
+
+    from midas_agent.config import MidasConfig
+
+    # LLM credentials come from env vars (via resolver), not the YAML.
+    # Strip any model/api_key/api_base from the YAML so resolver wins.
+    config_kwargs = {k: v for k, v in raw.items() if k not in ("model", "api_key", "api_base")}
+    config = MidasConfig(
+        model=llm_config.model,
+        api_key=llm_config.api_key,
+        api_base=llm_config.api_base or "",
+        **config_kwargs,
+    )
+
+    from midas_agent.training import load_swe_bench, run_training
+
+    issues = load_swe_bench()
+    if args.issues is not None:
+        issues = issues[: args.issues]
+
+    print(f"Training: {len(issues)} issues, budget={config.initial_budget}")
+    run_training(config, issues=issues)
+
+
+def _cmd_infer(args: argparse.Namespace) -> None:
+    """Execute the infer subcommand."""
+    from midas_agent.resolver import ConfigurationError, resolve_artifact_path, resolve_llm_config
+
+    try:
+        llm_config = resolve_llm_config(cli_model=args.model, cli_api_key=None)
+    except ConfigurationError as e:
+        print(str(e))
+        sys.exit(1)
+
+    artifact_path = resolve_artifact_path(explicit=args.artifact)
+
+    from midas_agent.inference.schemas import GraphEmergenceArtifact
+
+    with open(artifact_path) as f:
+        artifact = GraphEmergenceArtifact.model_validate_json(f.read())
+
+    from midas_agent.llm.litellm_provider import LiteLLMProvider
+
+    llm_provider = LiteLLMProvider(
+        model=llm_config.model,
+        api_key=llm_config.api_key,
+        api_base=llm_config.api_base,
+    )
+
+    actions = build_action_set(cwd=os.getcwd(), env=args.env)
+
+    budget = args.budget or artifact.budget_hint
+
+    from midas_agent.inference.production_meter import ProductionResourceMeter
+
+    meter = ProductionResourceMeter(llm_provider, budget)
+    call_llm = lambda req: meter.process(req)
+
+    from midas_agent.tui import TUI
+
+    tui = TUI(
+        call_llm=call_llm,
+        actions=actions,
+        system_prompt=artifact.responsible_agent.soul.system_prompt,
+    )
+    tui.run()
+
+
 def main(argv: list[str] | None = None) -> None:
-    """Entry point for the CLI (not yet implemented)."""
-    raise NotImplementedError
+    """Entry point for the CLI."""
+    args = parse_args(argv or sys.argv[1:])
+
+    if args.command == "train":
+        _cmd_train(args)
+    elif args.command == "infer":
+        _cmd_infer(args)

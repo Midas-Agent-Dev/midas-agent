@@ -3,7 +3,7 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from midas_agent.main_training import run_training, collect_patches, load_swe_bench
+from midas_agent.training import run_training, collect_patches, load_swe_bench
 from midas_agent.config import MidasConfig
 from midas_agent.types import Issue
 
@@ -46,7 +46,7 @@ class TestRunTraining:
         """run_training must internally create a Scheduler to orchestrate episodes."""
         config = self._make_config()
 
-        with patch("midas_agent.main_training.Scheduler") as MockScheduler:
+        with patch("midas_agent.training.Scheduler") as MockScheduler:
             mock_instance = MockScheduler.return_value
             mock_instance.get_workspaces.return_value = []
             mock_instance.create_workspaces.return_value = None
@@ -63,7 +63,7 @@ class TestRunTraining:
         config = self._make_config()
         issues = self._make_issues(2)
 
-        with patch("midas_agent.main_training.Scheduler") as MockScheduler:
+        with patch("midas_agent.training.Scheduler") as MockScheduler:
             mock_instance = MockScheduler.return_value
             mock_instance.get_workspaces.return_value = []
             mock_instance.create_workspaces.return_value = None
@@ -86,7 +86,7 @@ class TestRunTraining:
         """With no issues, no episodes are executed."""
         config = self._make_config()
 
-        with patch("midas_agent.main_training.Scheduler") as MockScheduler:
+        with patch("midas_agent.training.Scheduler") as MockScheduler:
             mock_instance = MockScheduler.return_value
             mock_instance.create_workspaces.return_value = None
 
