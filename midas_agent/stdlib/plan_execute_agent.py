@@ -24,6 +24,7 @@ class PlanExecuteAgent(ReactAgent):
         max_tool_output_chars: int | None = None,
         max_context_tokens: int | None = None,
         system_llm: Callable[[LLMRequest], LLMResponse] | None = None,
+        action_log: "IO | None" = None,
     ) -> None:
         super().__init__(
             system_prompt, actions, call_llm, max_iterations,
@@ -31,6 +32,7 @@ class PlanExecuteAgent(ReactAgent):
             max_tool_output_chars=max_tool_output_chars,
             max_context_tokens=max_context_tokens,
             system_llm=system_llm,
+            action_log=action_log,
         )
         self.market_info_provider = market_info_provider
 
@@ -108,6 +110,17 @@ class PlanExecuteAgent(ReactAgent):
                     )
                     result = action.execute(**tool_call.arguments)
                     logger.info("    → %s", result[:300] if result else "(empty)")
+
+                    # Write full output to action log BEFORE truncation
+                    if self.action_log is not None:
+                        self.action_log.write(_json.dumps({
+                            "iter": iterations,
+                            "action": tool_call.name,
+                            "args": tool_call.arguments,
+                            "result": result,
+                            "timestamp": time.time(),
+                        }) + "\n")
+                        self.action_log.flush()
 
                     # Truncate large tool output before it enters conversation history
                     if self.max_tool_output_chars is not None and result and len(result) > self.max_tool_output_chars:

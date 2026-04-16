@@ -40,6 +40,7 @@ class ReactAgent:
         max_context_tokens: int | None = None,
         system_llm: Callable[[LLMRequest], LLMResponse] | None = None,
         on_action: Callable | None = None,  # Callable[[ActionEvent], None]
+        action_log: "IO | None" = None,
     ) -> None:
         self.system_prompt = system_prompt
         self.actions = actions
@@ -50,6 +51,7 @@ class ReactAgent:
         self.max_context_tokens = max_context_tokens
         self.system_llm = system_llm
         self.on_action = on_action
+        self.action_log = action_log
         self._actions_by_name: dict[str, Action] = {a.name: a for a in actions}
 
     def _build_tools(self) -> list[dict] | None:
@@ -155,6 +157,18 @@ class ReactAgent:
                         )
                         result = action.execute(**tool_call.arguments)
                         logger.info("    → %s", result[:200] if result else "(empty)")
+
+                    # Write full output to action log BEFORE truncation
+                    if self.action_log is not None:
+                        import json as _json
+                        self.action_log.write(_json.dumps({
+                            "iter": iterations,
+                            "action": tool_call.name,
+                            "args": tool_call.arguments,
+                            "result": result,
+                            "timestamp": time.time(),
+                        }) + "\n")
+                        self.action_log.flush()
 
                     # Truncate large tool output before it enters conversation history
                     if self.max_tool_output_chars is not None and result and len(result) > self.max_tool_output_chars:

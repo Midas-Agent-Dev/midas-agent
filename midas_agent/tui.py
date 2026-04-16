@@ -21,11 +21,13 @@ class TUI:
         actions: list[Action],
         system_prompt: str,
         on_action: Callable[[ActionEvent], None] | None = None,
+        action_log: "IO | None" = None,
     ) -> None:
         self._call_llm = call_llm
         self._actions = actions
         self._system_prompt = system_prompt
         self._on_action = on_action
+        self._action_log = action_log
 
     def run(self) -> None:
         """REPL loop: read input, run agent, display output."""
@@ -50,6 +52,7 @@ class TUI:
                 actions=self._actions,
                 call_llm=self._call_llm,
                 on_action=self._on_action,
+                action_log=self._action_log,
             )
             result = agent.run(context=stripped)
             if result.output:

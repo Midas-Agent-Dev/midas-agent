@@ -36,6 +36,7 @@ class GraphEmergenceWorkspace(Workspace):
         action_overrides: dict | None = None,
         max_tool_output_chars: int | None = None,
         extra_actions: list | None = None,
+        action_log: "IO | None" = None,
     ) -> None:
         super().__init__(workspace_id, call_llm, system_llm)
         self._responsible_agent = responsible_agent
@@ -46,6 +47,7 @@ class GraphEmergenceWorkspace(Workspace):
         self._action_overrides = action_overrides or {}
         self._max_tool_output_chars = max_tool_output_chars
         self._extra_actions = extra_actions or []
+        self._action_log = action_log
         self._budget = 0
         self._last_result = None
         self._patches_dir: str = "/tmp/patches"
@@ -93,6 +95,7 @@ class GraphEmergenceWorkspace(Workspace):
             market_info_provider=lambda: self._build_market_info(),
             balance_provider=balance_provider,
             max_tool_output_chars=self._max_tool_output_chars,
+            action_log=self._action_log,
         )
         self._last_result = agent.run(context=issue.description)
 
