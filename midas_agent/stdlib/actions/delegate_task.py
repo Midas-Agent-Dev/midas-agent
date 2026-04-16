@@ -195,11 +195,14 @@ class DelegateTaskAction(Action):
         task_description = kwargs.get("task_description") or kwargs.get("task") or ""
         spawn = kwargs.get("spawn", False)
 
-        # Normalize spawn parameter: True, string, or list of strings
+        # Validate spawn parameter type
         if spawn is True:
             spawn = [task_description]
-        elif isinstance(spawn, str) and spawn.strip():
-            spawn = [spawn.strip()]
+        elif spawn and not isinstance(spawn, list):
+            return (
+                f"Error: 'spawn' must be an array of strings, got {type(spawn).__name__}. "
+                f"Example: spawn=[\"worker: analyze the bug\"]"
+            )
 
         # Handle spawn request (list of specialist descriptions)
         if isinstance(spawn, list) and spawn and self._spawn_callback is not None:
