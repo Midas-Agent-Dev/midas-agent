@@ -11,8 +11,7 @@ from midas_agent.stdlib.action import Action
 def parse_args(argv: list[str]) -> argparse.Namespace:
     """Parse CLI arguments with train/infer subcommands."""
     parser = argparse.ArgumentParser(prog="midas", description="Midas Agent CLI")
-    subparsers = parser.add_subparsers(dest="command")
-    subparsers.required = True
+    subparsers = parser.add_subparsers(dest="command", required=False)
 
     # -- train subcommand --
     train_parser = subparsers.add_parser("train", help="Run training pipeline")
@@ -178,5 +177,6 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.command == "train":
         _cmd_train(args)
-    elif args.command == "infer":
+    else:
+        # Default: infer (no subcommand or explicit "infer")
         _cmd_infer(args)

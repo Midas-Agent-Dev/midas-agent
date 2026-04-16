@@ -101,10 +101,10 @@ class TestInferArgs:
 class TestGeneralCLI:
     """General CLI behavior: no subcommand, unknown subcommand, etc."""
 
-    def test_no_subcommand_exits(self):
-        """Running with no subcommand shows help and exits."""
-        with pytest.raises(SystemExit):
-            parse_args([])
+    def test_no_subcommand_defaults_to_infer(self):
+        """Running with no subcommand defaults to infer mode."""
+        args = parse_args([])
+        assert args.command is None  # main() treats None as infer
 
     def test_unknown_subcommand_exits(self):
         """Unknown subcommand raises SystemExit."""
