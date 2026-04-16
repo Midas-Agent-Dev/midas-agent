@@ -224,9 +224,31 @@ class DockerEditFileAction(EditFileAction):
             )
             if result.returncode != 0:
                 return f"Error writing file: {result.stderr}"
-            return f"Edited {path}"
+
+            # Show context snippet around the edit
+            snippet = self._snippet(new_content, new_string, path)
+            return snippet
         except Exception as e:
             return f"Error writing edited file: {e}"
+
+    @staticmethod
+    def _snippet(content: str, new_string: str, path: str, context_lines: int = 4) -> str:
+        """Return cat -n style snippet around the edited region."""
+        lines = content.splitlines()
+        # Find the start of new_string in the content
+        idx = content.find(new_string)
+        if idx == -1:
+            return f"Edited {path}"
+        line_num = content[:idx].count("\n")
+        start = max(0, line_num - context_lines)
+        end = min(len(lines), line_num + new_string.count("\n") + 1 + context_lines)
+        snippet_lines = []
+        for i in range(start, end):
+            snippet_lines.append(f"  {i + 1:>5}\t{lines[i]}")
+        return (
+            f"The file {path} has been edited. Here's the result of running `cat -n` on a snippet:\n"
+            + "\n".join(snippet_lines)
+        )
 
 
 # ---------------------------------------------------------------------------
