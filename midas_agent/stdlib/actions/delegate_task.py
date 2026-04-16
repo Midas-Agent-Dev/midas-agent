@@ -195,9 +195,11 @@ class DelegateTaskAction(Action):
         task_description = kwargs.get("task_description") or kwargs.get("task") or ""
         spawn = kwargs.get("spawn", False)
 
-        # Backward compat: spawn=True treated as spawn=[task_description]
+        # Normalize spawn parameter: True, string, or list of strings
         if spawn is True:
             spawn = [task_description]
+        elif isinstance(spawn, str) and spawn.strip():
+            spawn = [spawn.strip()]
 
         # Handle spawn request (list of specialist descriptions)
         if isinstance(spawn, list) and spawn and self._spawn_callback is not None:
