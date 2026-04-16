@@ -132,15 +132,27 @@ class ReactAgent:
                 messages.append(assistant_msg)
 
                 for tool_call in response.tool_calls:
-                    action = self._actions_by_name[tool_call.name]
-                    logger.info(
-                        "  [iter %d] %s(%s)",
-                        iterations,
-                        tool_call.name,
-                        ", ".join(f"{k}={repr(v)[:80]}" for k, v in tool_call.arguments.items()),
-                    )
-                    result = action.execute(**tool_call.arguments)
-                    logger.info("    → %s", result[:200] if result else "(empty)")
+                    action = self._actions_by_name.get(tool_call.name)
+                    if action is None:
+                        available = ", ".join(sorted(self._actions_by_name.keys()))
+                        result = (
+                            f"Error: tool '{tool_call.name}' is not available. "
+                            f"Available tools: {available}"
+                        )
+                        logger.warning(
+                            "  [iter %d] Unknown tool: %s",
+                            iterations,
+                            tool_call.name,
+                        )
+                    else:
+                        logger.info(
+                            "  [iter %d] %s(%s)",
+                            iterations,
+                            tool_call.name,
+                            ", ".join(f"{k}={repr(v)[:80]}" for k, v in tool_call.arguments.items()),
+                        )
+                        result = action.execute(**tool_call.arguments)
+                        logger.info("    → %s", result[:200] if result else "(empty)")
 
                     # Truncate large tool output before it enters conversation history
                     if self.max_tool_output_chars is not None and result and len(result) > self.max_tool_output_chars:

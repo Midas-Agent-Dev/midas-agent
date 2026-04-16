@@ -14,12 +14,14 @@ class DelegateTaskAction(Action):
         balance_provider: Callable[[], int] | None = None,
         calling_agent_id: str | None = None,
         call_llm: Callable | None = None,
+        parent_actions: list | None = None,
     ) -> None:
         self._find_candidates = find_candidates
         self._spawn_callback = spawn_callback
         self._balance_provider = balance_provider
         self._calling_agent_id = calling_agent_id
         self._call_llm = call_llm
+        self._parent_actions = parent_actions or []
 
     @property
     def name(self) -> str:
@@ -83,6 +85,47 @@ class DelegateTaskAction(Action):
             pass
         return False
 
+    def _build_sub_agent_actions(self, protected_by: str | None) -> list:
+        """Build action set for a sub-agent based on protection status.
+
+        Protected agents (幼年): basic actions + report_result, NO use_agent, NO task_done.
+        Independent agents: basic actions + use_agent + report_result.
+        """
+        from midas_agent.stdlib.actions.report_result import ReportResultAction
+
+        if not self._parent_actions:
+            # Fallback: minimal actions (backward compat)
+            from midas_agent.stdlib.actions.task_done import TaskDoneAction
+            return [TaskDoneAction()]
+
+        result = []
+        for action in self._parent_actions:
+            if protected_by is not None:
+                # Protected agent: no use_agent, no task_done
+                if action.name == "use_agent":
+                    continue
+                if action.name == "task_done":
+                    continue
+            result.append(action)
+
+        # Independent agents need use_agent (a new DelegateTaskAction instance)
+        if protected_by is None:
+            has_use_agent = any(a.name == "use_agent" for a in result)
+            if not has_use_agent:
+                result.append(DelegateTaskAction(
+                    find_candidates=self._find_candidates,
+                    spawn_callback=self._spawn_callback,
+                    call_llm=self._call_llm,
+                    parent_actions=self._parent_actions,
+                ))
+
+        # Add report_result for sub-agents (if not already present)
+        has_report = any(a.name == "report_result" for a in result)
+        if not has_report:
+            result.append(ReportResultAction(report=lambda r: None))
+
+        return result
+
     def execute(self, **kwargs) -> str:
         task_description = kwargs["task_description"]
         spawn = kwargs.get("spawn", False)
@@ -102,11 +145,10 @@ class DelegateTaskAction(Action):
                 aid = getattr(agent, "agent_id", None) or "new agent"
                 if self._call_llm is not None:
                     from midas_agent.stdlib.react_agent import ReactAgent
-                    from midas_agent.stdlib.actions.task_done import TaskDoneAction
 
                     sub_agent = ReactAgent(
                         system_prompt=agent.soul.system_prompt,
-                        actions=[TaskDoneAction()],
+                        actions=self._build_sub_agent_actions(agent.protected_by),
                         call_llm=self._call_llm,
                         max_iterations=10,
                     )
@@ -133,11 +175,10 @@ class DelegateTaskAction(Action):
                     return f"Agent not found: {agent_id_param}"
 
                 from midas_agent.stdlib.react_agent import ReactAgent
-                from midas_agent.stdlib.actions.task_done import TaskDoneAction
 
                 sub_agent = ReactAgent(
                     system_prompt=target.soul.system_prompt,
-                    actions=[TaskDoneAction()],
+                    actions=self._build_sub_agent_actions(target.protected_by),
                     call_llm=self._call_llm,
                     max_iterations=10,
                 )

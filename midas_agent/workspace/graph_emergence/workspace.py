@@ -63,25 +63,27 @@ class GraphEmergenceWorkspace(Workspace):
         # task_done, delegate_task
         cwd = self.work_dir or None
         balance_provider = lambda: self._budget
-        delegate = DelegateTaskAction(
-            find_candidates=lambda desc: self._free_agent_manager.match(desc),
-            spawn_callback=lambda desc: self._spawn_agent(desc),
-            balance_provider=balance_provider,
-            calling_agent_id=self._responsible_agent.agent_id,
-            call_llm=self._call_llm,
-        )
 
         ov = self._action_overrides
-        actions = list(self._extra_actions) + [
+        base_actions = [
             ov.get("bash", BashAction(cwd=cwd)),
             ov.get("read_file", ReadFileAction(cwd=cwd)),
             ov.get("edit_file", EditFileAction(cwd=cwd)),
             ov.get("write_file", WriteFileAction(cwd=cwd)),
             ov.get("search_code", SearchCodeAction(cwd=cwd)),
             ov.get("find_files", FindFilesAction(cwd=cwd)),
-            TaskDoneAction(),
-            delegate,
         ]
+
+        delegate = DelegateTaskAction(
+            find_candidates=lambda desc: self._free_agent_manager.match(desc),
+            spawn_callback=lambda desc: self._spawn_agent(desc),
+            balance_provider=balance_provider,
+            calling_agent_id=self._responsible_agent.agent_id,
+            call_llm=self._call_llm,
+            parent_actions=base_actions,
+        )
+
+        actions = list(self._extra_actions) + base_actions + [TaskDoneAction(), delegate]
 
         agent = PlanExecuteAgent(
             system_prompt=self._responsible_agent.soul.system_prompt,
