@@ -5,6 +5,8 @@ from pathlib import Path
 
 from midas_agent.stdlib.action import Action
 
+DEFAULT_SEARCH_LIMIT = 30
+
 
 class SearchCodeAction(Action):
     def __init__(self, cwd: str | None = None) -> None:
@@ -54,12 +56,31 @@ class SearchCodeAction(Action):
             "pattern": {"type": "string", "required": True},
             "path": {"type": "string", "required": False},
             "include": {"type": "string", "required": False},
+            "max_results": {"type": "integer", "required": False},
         }
+
+    def _strip_cwd_prefix(self, output: str) -> str:
+        """Strip the cwd prefix from all paths in search output."""
+        cwd = self.cwd or os.getcwd()
+        # Ensure cwd ends with separator for clean stripping
+        if not cwd.endswith(os.sep):
+            cwd += os.sep
+        return output.replace(cwd, "")
+
+    def _apply_limit(self, output: str, limit: int) -> str:
+        """Cap output to limit lines and append truncation indicator."""
+        lines = output.split("\n")
+        if len(lines) <= limit:
+            return output
+        kept = "\n".join(lines[:limit])
+        remaining = len(lines) - limit
+        return f"{kept}\n... and {remaining} more matches (use max_results to see more)"
 
     def execute(self, **kwargs) -> str:
         pattern = kwargs["pattern"]
         include = kwargs.get("include")
         path = kwargs.get("path")
+        max_results = kwargs.get("max_results", DEFAULT_SEARCH_LIMIT)
 
         search_dir = self.cwd or os.getcwd()
         if path:
@@ -76,7 +97,8 @@ class SearchCodeAction(Action):
                 cmd, capture_output=True, text=True, timeout=30
             )
             if result.returncode == 0 and result.stdout.strip():
-                return result.stdout.strip()
+                output = self._strip_cwd_prefix(result.stdout.strip())
+                return self._apply_limit(output, max_results)
             if result.returncode == 1:
                 # rg returns 1 when no matches
                 return "No matches found"
@@ -96,12 +118,16 @@ class SearchCodeAction(Action):
                     cmd, capture_output=True, text=True, timeout=30
                 )
                 if result.returncode == 0 and result.stdout.strip():
-                    return result.stdout.strip()
+                    output = self._strip_cwd_prefix(result.stdout.strip())
+                    return self._apply_limit(output, max_results)
                 return "No matches found"
             except Exception as e:
                 return f"Search error: {e}"
         except Exception as e:
             return f"Search error: {e}"
+
+
+DEFAULT_FIND_LIMIT = 50
 
 
 class FindFilesAction(Action):
@@ -142,11 +168,13 @@ class FindFilesAction(Action):
         return {
             "pattern": {"type": "string", "required": True},
             "path": {"type": "string", "required": False},
+            "max_results": {"type": "integer", "required": False},
         }
 
     def execute(self, **kwargs) -> str:
         pattern = kwargs["pattern"]
         path = kwargs.get("path")
+        max_results = kwargs.get("max_results", DEFAULT_FIND_LIMIT)
 
         base_dir = Path(self.cwd) if self.cwd else Path.cwd()
         if path:
@@ -170,4 +198,12 @@ class FindFilesAction(Action):
         if not rel_paths:
             return f"No files found matching: {pattern}"
 
-        return "\n".join(rel_paths)
+        total = len(rel_paths)
+        if total <= max_results:
+            return "\n".join(rel_paths)
+
+        # Keep max_results - 1 data lines + 1 indicator line = max_results total
+        show_count = max(max_results - 1, 1)
+        kept = rel_paths[:show_count]
+        remaining = total - show_count
+        return "\n".join(kept) + f"\n... and {remaining} more files (use max_results to see more)"

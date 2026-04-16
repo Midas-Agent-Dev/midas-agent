@@ -4,6 +4,8 @@ import os
 
 from midas_agent.stdlib.action import Action
 
+DEFAULT_READ_LIMIT = 200
+
 
 class ReadFileAction(Action):
     def __init__(self, cwd: str | None = None) -> None:
@@ -60,11 +62,36 @@ class ReadFileAction(Action):
         file_path = self._resolve(kwargs["path"])
         offset = kwargs.get("offset", 0)
         limit = kwargs.get("limit")
+        # Apply default limit when caller does not specify one
+        effective_limit = limit if limit is not None else DEFAULT_READ_LIMIT
         try:
             with open(file_path, "r") as f:
                 lines = f.readlines()
-            selected = lines[offset:] if limit is None else lines[offset:offset + limit]
-            return "".join(selected)
+            total_lines = len(lines)
+            end_index = min(offset + effective_limit, total_lines)
+            selected = lines[offset:end_index]
+
+            # Format with line numbers (1-indexed, accounting for offset)
+            numbered: list[str] = []
+            for i, line in enumerate(selected):
+                line_num = offset + i + 1  # 1-indexed
+                # Strip trailing newline for consistent formatting
+                content = line.rstrip("\n")
+                numbered.append(f"{line_num:>6}\t{content}")
+
+            result = "\n".join(numbered)
+
+            # Append truncation indicator if file has more lines than shown
+            if end_index < total_lines:
+                start_num = offset + 1
+                end_num = end_index
+                result += (
+                    f"\n[File has {total_lines} lines total. "
+                    f"Showing lines {start_num}-{end_num}. "
+                    f"Use offset and limit to read more.]"
+                )
+
+            return result
         except FileNotFoundError:
             return f"File not found: {file_path}"
         except Exception as e:
