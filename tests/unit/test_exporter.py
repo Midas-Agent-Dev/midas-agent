@@ -82,9 +82,9 @@ class TestExportGraphEmergence:
             assert artifact.budget_hint == 50000
             assert artifact.responsible_agent.soul.system_prompt == "prompt-resp-1"
             assert len(artifact.free_agents) == 2
-            assert artifact.free_agents[0].price == 1000
-            assert artifact.free_agents[0].bankruptcy_rate == pytest.approx(0.1)
-            assert artifact.free_agents[1].bankruptcy_rate == pytest.approx(0.6)
+            assert artifact.agent_prices["fa-1"] == 1000
+            assert artifact.agent_bankruptcy_rates["fa-1"] == pytest.approx(0.1)
+            assert artifact.agent_bankruptcy_rates["fa-2"] == pytest.approx(0.6)
             assert artifact.free_agents[1].skill is None
 
             # Verify file is valid JSON
@@ -113,6 +113,6 @@ class TestExportGraphEmergence:
                 budget_hint=10000,
                 output_path=output_path,
             )
-            assert artifact.free_agents[0].bankruptcy_rate == 0.0
+            assert artifact.agent_bankruptcy_rates["fa-1"] == 0.0
         finally:
             os.unlink(output_path)

@@ -1,9 +1,8 @@
 """Relationship data class for Graph Emergence."""
-from dataclasses import dataclass
+from pydantic import BaseModel
 
 
-@dataclass
-class Relationship:
+class Relationship(BaseModel):
     type: str  # "protection" | "hire"
     from_agent_id: str
     to_agent_id: str

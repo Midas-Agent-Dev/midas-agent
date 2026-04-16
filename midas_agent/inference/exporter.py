@@ -2,11 +2,7 @@
 from __future__ import annotations
 
 from midas_agent.inference.schemas import (
-    FreeAgentSchema,
     GraphEmergenceArtifact,
-    ResponsibleAgentSchema,
-    SkillSchema,
-    SoulSchema,
 )
 from midas_agent.workspace.config_evolution.snapshot_store import (
     ConfigSnapshotStore,
@@ -53,17 +49,9 @@ def export_graph_emergence(
 
     Returns the constructed artifact.
     """
-    def _soul(agent: Agent) -> SoulSchema:
-        return SoulSchema(system_prompt=agent.soul.system_prompt)
-
-    def _skill(agent: Agent) -> SkillSchema | None:
-        if agent.skill is None:
-            return None
-        return SkillSchema(
-            name=agent.skill.name,
-            description=agent.skill.description,
-            content=agent.skill.content,
-        )
+    agent_prices = {
+        fa.agent_id: pricing_engine.calculate_price(fa) for fa in free_agents
+    }
 
     def _bankruptcy_rate(agent_id: str) -> float:
         hires = hire_counts.get(agent_id, 0)
@@ -71,25 +59,15 @@ def export_graph_emergence(
             return 0.0
         return bankruptcy_counts.get(agent_id, 0) / hires
 
-    responsible = ResponsibleAgentSchema(
-        soul=_soul(responsible_agent),
-        skill=_skill(responsible_agent),
-    )
-
-    fa_schemas = [
-        FreeAgentSchema(
-            agent_id=fa.agent_id,
-            soul=_soul(fa),
-            skill=_skill(fa),
-            price=pricing_engine.calculate_price(fa),
-            bankruptcy_rate=_bankruptcy_rate(fa.agent_id),
-        )
-        for fa in free_agents
-    ]
+    agent_bankruptcy_rates = {
+        fa.agent_id: _bankruptcy_rate(fa.agent_id) for fa in free_agents
+    }
 
     artifact = GraphEmergenceArtifact(
-        responsible_agent=responsible,
-        free_agents=fa_schemas,
+        responsible_agent=responsible_agent,
+        free_agents=free_agents,
+        agent_prices=agent_prices,
+        agent_bankruptcy_rates=agent_bankruptcy_rates,
         budget_hint=budget_hint,
     )
 

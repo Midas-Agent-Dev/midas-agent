@@ -3,32 +3,16 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-
-class SoulSchema(BaseModel):
-    system_prompt: str
-
-
-class SkillSchema(BaseModel):
-    name: str
-    description: str
-    content: str
-
-
-class ResponsibleAgentSchema(BaseModel):
-    soul: SoulSchema
-    skill: SkillSchema | None = None
-
-
-class FreeAgentSchema(BaseModel):
-    agent_id: str
-    soul: SoulSchema
-    skill: SkillSchema | None = None
-    price: int
-    bankruptcy_rate: float = Field(ge=0.0, le=1.0)
+from midas_agent.workspace.graph_emergence.agent import Agent
 
 
 class GraphEmergenceArtifact(BaseModel):
     """Production artifact for Graph Emergence mode."""
-    responsible_agent: ResponsibleAgentSchema
-    free_agents: list[FreeAgentSchema] = Field(default_factory=list)
+    responsible_agent: Agent
+    free_agents: list[Agent] = Field(default_factory=list)
+    agent_prices: dict[str, int] = Field(default_factory=dict)
+    agent_bankruptcy_rates: dict[str, float] = Field(default_factory=dict)
+    last_etas: dict[str, float] = Field(default_factory=dict)
+    adaptive_multiplier_value: float = 1.0
+    total_episodes: int = 0
     budget_hint: int

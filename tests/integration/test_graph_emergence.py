@@ -1678,18 +1678,28 @@ class TestIT626BankruptcyRateComputation:
     def test_export_uses_computed_bankruptcy_rate(self):
         """The exported GraphEmergenceArtifact must use computed
         bankruptcy_rate, not hardcoded 0.0. Issue #3 Bug 2."""
-        from midas_agent.inference.schemas import FreeAgentSchema, SoulSchema
+        from midas_agent.inference.schemas import GraphEmergenceArtifact
+        from midas_agent.workspace.graph_emergence.agent import Agent, Soul
 
         # A free agent that served an evicted workspace should have
-        # bankruptcy_rate > 0 in the export.
-        schema = FreeAgentSchema(
+        # bankruptcy_rate > 0 in the export artifact dict.
+        agent = Agent(
             agent_id="free-a",
-            soul=SoulSchema(system_prompt="test"),
-            skill=None,
-            price=120,
-            bankruptcy_rate=0.333,
+            soul=Soul(system_prompt="test"),
+            agent_type="free",
         )
-        assert schema.bankruptcy_rate == pytest.approx(0.333)
-        assert schema.bankruptcy_rate > 0.0, (
-            "Export schema must support non-zero bankruptcy_rate"
+        artifact = GraphEmergenceArtifact(
+            responsible_agent=Agent(
+                agent_id="resp",
+                soul=Soul(system_prompt="coord"),
+                agent_type="workspace_bound",
+            ),
+            free_agents=[agent],
+            agent_prices={"free-a": 120},
+            agent_bankruptcy_rates={"free-a": 0.333},
+            budget_hint=10000,
+        )
+        assert artifact.agent_bankruptcy_rates["free-a"] == pytest.approx(0.333)
+        assert artifact.agent_bankruptcy_rates["free-a"] > 0.0, (
+            "Export artifact must support non-zero bankruptcy_rate"
         )

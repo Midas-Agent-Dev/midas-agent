@@ -1,23 +1,18 @@
 """Agent and Soul for Graph Emergence."""
-from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from pydantic import BaseModel, Field
 
-if TYPE_CHECKING:
-    from midas_agent.workspace.graph_emergence.skill import Skill
+from midas_agent.workspace.graph_emergence.skill import Skill
 
 
-@dataclass
-class Soul:
+class Soul(BaseModel):
     system_prompt: str
 
 
-@dataclass
-class Agent:
+class Agent(BaseModel):
     agent_id: str
     soul: Soul
     agent_type: str  # "workspace_bound" | "free"
     skill: Skill | None = None
     protected_by: str | None = None
-    protecting: list[str] = field(default_factory=list)
+    protecting: list[str] = Field(default_factory=list)

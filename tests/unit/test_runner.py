@@ -6,13 +6,9 @@ import tempfile
 import pytest
 
 from midas_agent.inference.runner import run_inference, _build_market_info
-from midas_agent.inference.schemas import (
-    FreeAgentSchema,
-    GraphEmergenceArtifact,
-    ResponsibleAgentSchema,
-    SkillSchema,
-    SoulSchema,
-)
+from midas_agent.inference.schemas import GraphEmergenceArtifact
+from midas_agent.workspace.graph_emergence.agent import Agent, Soul
+from midas_agent.workspace.graph_emergence.skill import Skill
 from midas_agent.llm.types import LLMResponse, TokenUsage
 from midas_agent.stdlib.action import ActionRegistry
 from midas_agent.types import Issue
@@ -30,6 +26,27 @@ def _make_issue() -> Issue:
 
 def _make_action_registry() -> ActionRegistry:
     return ActionRegistry(actions=[])
+
+
+def _make_responsible_agent(prompt: str = "coord") -> Agent:
+    return Agent(
+        agent_id="resp",
+        soul=Soul(system_prompt=prompt),
+        agent_type="workspace_bound",
+    )
+
+
+def _make_free_agent(
+    agent_id: str,
+    prompt: str = "test",
+    skill: Skill | None = None,
+) -> Agent:
+    return Agent(
+        agent_id=agent_id,
+        soul=Soul(system_prompt=prompt),
+        agent_type="free",
+        skill=skill,
+    )
 
 
 @pytest.mark.unit
@@ -71,18 +88,16 @@ class TestRunInference:
     def test_graph_emergence_basic(self, fake_llm_provider):
         """Graph emergence mode loads JSON artifact and runs PlanExecuteAgent."""
         artifact = GraphEmergenceArtifact(
-            responsible_agent=ResponsibleAgentSchema(
-                soul=SoulSchema(system_prompt="You are a coordinator."),
-            ),
+            responsible_agent=_make_responsible_agent("You are a coordinator."),
             free_agents=[
-                FreeAgentSchema(
-                    agent_id="fa-1",
-                    soul=SoulSchema(system_prompt="test agent"),
-                    skill=SkillSchema(name="debug", description="debugging", content="..."),
-                    price=500,
-                    bankruptcy_rate=0.1,
+                _make_free_agent(
+                    "fa-1",
+                    prompt="test agent",
+                    skill=Skill(name="debug", description="debugging", content="..."),
                 ),
             ],
+            agent_prices={"fa-1": 500},
+            agent_bankruptcy_rates={"fa-1": 0.1},
             budget_hint=10000,
         )
 
@@ -109,9 +124,7 @@ class TestRunInference:
         ])
 
         artifact = GraphEmergenceArtifact(
-            responsible_agent=ResponsibleAgentSchema(
-                soul=SoulSchema(system_prompt="coord"),
-            ),
+            responsible_agent=_make_responsible_agent(),
             budget_hint=100000,
         )
 
@@ -136,18 +149,15 @@ class TestRunInference:
 class TestBuildMarketInfo:
     def test_includes_agent_info(self):
         artifact = GraphEmergenceArtifact(
-            responsible_agent=ResponsibleAgentSchema(
-                soul=SoulSchema(system_prompt="coord"),
-            ),
+            responsible_agent=_make_responsible_agent(),
             free_agents=[
-                FreeAgentSchema(
-                    agent_id="fa-1",
-                    soul=SoulSchema(system_prompt="test"),
-                    skill=SkillSchema(name="debug", description="debugging code", content="..."),
-                    price=1000,
-                    bankruptcy_rate=0.05,
+                _make_free_agent(
+                    "fa-1",
+                    skill=Skill(name="debug", description="debugging code", content="..."),
                 ),
             ],
+            agent_prices={"fa-1": 1000},
+            agent_bankruptcy_rates={"fa-1": 0.05},
             budget_hint=50000,
         )
         info = _build_market_info(artifact)
@@ -158,17 +168,12 @@ class TestBuildMarketInfo:
 
     def test_handles_no_skill(self):
         artifact = GraphEmergenceArtifact(
-            responsible_agent=ResponsibleAgentSchema(
-                soul=SoulSchema(system_prompt="coord"),
-            ),
+            responsible_agent=_make_responsible_agent(),
             free_agents=[
-                FreeAgentSchema(
-                    agent_id="fa-2",
-                    soul=SoulSchema(system_prompt="test"),
-                    price=500,
-                    bankruptcy_rate=0.0,
-                ),
+                _make_free_agent("fa-2"),
             ],
+            agent_prices={"fa-2": 500},
+            agent_bankruptcy_rates={"fa-2": 0.0},
             budget_hint=10000,
         )
         info = _build_market_info(artifact)
@@ -176,9 +181,7 @@ class TestBuildMarketInfo:
 
     def test_empty_agents(self):
         artifact = GraphEmergenceArtifact(
-            responsible_agent=ResponsibleAgentSchema(
-                soul=SoulSchema(system_prompt="coord"),
-            ),
+            responsible_agent=_make_responsible_agent(),
             budget_hint=10000,
         )
         info = _build_market_info(artifact)

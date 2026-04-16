@@ -386,13 +386,7 @@ def _do_export(
         return
 
     if config.runtime_mode == "graph_emergence":
-        from midas_agent.inference.schemas import (
-            FreeAgentSchema,
-            GraphEmergenceArtifact,
-            ResponsibleAgentSchema,
-            SkillSchema,
-            SoulSchema,
-        )
+        from midas_agent.inference.schemas import GraphEmergenceArtifact
 
         # Collect all workspace IDs that were evicted across training.
         evicted_ws_ids = scheduler.get_all_evicted_ever()
@@ -405,17 +399,13 @@ def _do_export(
             return
 
         fa_manager = getattr(ws, "_free_agent_manager", None)
-        free_agents_schemas = []
+        free_agents = []
+        agent_prices: dict[str, int] = {}
+        agent_bankruptcy_rates: dict[str, float] = {}
         if fa_manager:
             for agent_id, agent in fa_manager.free_agents.items():
-                skill_schema = None
-                if agent.skill:
-                    skill_schema = SkillSchema(
-                        name=agent.skill.name,
-                        description=agent.skill.description,
-                        content=agent.skill.content,
-                    )
-                price = fa_manager._pricing_engine.calculate_price(agent)
+                free_agents.append(agent)
+                agent_prices[agent.agent_id] = fa_manager._pricing_engine.calculate_price(agent)
 
                 # Compute bankruptcy_rate: fraction of workspaces this
                 # agent served that were evicted via budget exhaustion.
@@ -431,29 +421,27 @@ def _do_export(
                     }
                     if served:
                         br = len(served & evicted_ws_ids) / len(served)
+                agent_bankruptcy_rates[agent.agent_id] = br
 
-                free_agents_schemas.append(FreeAgentSchema(
-                    agent_id=agent.agent_id,
-                    soul=SoulSchema(system_prompt=agent.soul.system_prompt),
-                    skill=skill_schema,
-                    price=price,
-                    bankruptcy_rate=br,
-                ))
+        # Gather training metadata
+        last_etas: dict[str, float] = {}
+        if hasattr(scheduler, '_last_etas'):
+            last_etas = scheduler._last_etas
 
-        resp_skill = None
-        if resp_agent.skill:
-            resp_skill = SkillSchema(
-                name=resp_agent.skill.name,
-                description=resp_agent.skill.description,
-                content=resp_agent.skill.content,
-            )
+        adaptive_multiplier_value = 1.0
+        if hasattr(scheduler, '_budget_allocator') and hasattr(scheduler._budget_allocator, '_adaptive_multiplier'):
+            adaptive_multiplier_value = scheduler._budget_allocator._adaptive_multiplier.value
+
+        total_episodes = getattr(scheduler, '_episode_count', 0)
 
         artifact = GraphEmergenceArtifact(
-            responsible_agent=ResponsibleAgentSchema(
-                soul=SoulSchema(system_prompt=resp_agent.soul.system_prompt),
-                skill=resp_skill,
-            ),
-            free_agents=free_agents_schemas,
+            responsible_agent=resp_agent,
+            free_agents=free_agents,
+            agent_prices=agent_prices,
+            agent_bankruptcy_rates=agent_bankruptcy_rates,
+            last_etas=last_etas,
+            adaptive_multiplier_value=adaptive_multiplier_value,
+            total_episodes=total_episodes,
             budget_hint=config.initial_budget,
         )
 

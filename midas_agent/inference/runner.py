@@ -19,9 +19,7 @@ from midas_agent.workspace.config_evolution.config_schema import (
     WorkflowConfig,
 )
 from midas_agent.workspace.config_evolution.executor import DAGExecutor
-from midas_agent.workspace.graph_emergence.agent import Agent, Soul
 from midas_agent.workspace.graph_emergence.free_agent_manager import FreeAgentManager
-from midas_agent.workspace.graph_emergence.skill import Skill
 
 
 def run_inference(
@@ -95,25 +93,11 @@ def _run_graph_emergence(
     artifact = GraphEmergenceArtifact.model_validate(raw)
 
     # Build frozen pricing from artifact
-    frozen_prices = {fa.agent_id: fa.price for fa in artifact.free_agents}
-    frozen_pricing = FrozenPricingEngine(frozen_prices)
+    frozen_pricing = FrozenPricingEngine(artifact.agent_prices)
 
     # Build free agent manager with frozen prices
     free_agent_manager = FreeAgentManager(pricing_engine=frozen_pricing)
-    for fa_schema in artifact.free_agents:
-        skill = None
-        if fa_schema.skill is not None:
-            skill = Skill(
-                name=fa_schema.skill.name,
-                description=fa_schema.skill.description,
-                content=fa_schema.skill.content,
-            )
-        agent = Agent(
-            agent_id=fa_schema.agent_id,
-            soul=Soul(system_prompt=fa_schema.soul.system_prompt),
-            agent_type="free",
-            skill=skill,
-        )
+    for agent in artifact.free_agents:
         free_agent_manager.register(agent)
 
     # Set up metered LLM callback
@@ -144,8 +128,10 @@ def _build_market_info(artifact: GraphEmergenceArtifact) -> str:
     lines = ["Available agents:"]
     for fa in artifact.free_agents:
         skill_desc = fa.skill.description if fa.skill else "no skill"
+        price = artifact.agent_prices.get(fa.agent_id, 0)
+        bankruptcy_rate = artifact.agent_bankruptcy_rates.get(fa.agent_id, 0.0)
         lines.append(
             f"  - {fa.agent_id}: {skill_desc} "
-            f"(price={fa.price}, bankruptcy_rate={fa.bankruptcy_rate:.0%})"
+            f"(price={price}, bankruptcy_rate={bankruptcy_rate:.0%})"
         )
     return "\n".join(lines)

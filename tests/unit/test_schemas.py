@@ -3,94 +3,80 @@ import json
 
 import pytest
 
-from midas_agent.inference.schemas import (
-    FreeAgentSchema,
-    GraphEmergenceArtifact,
-    ResponsibleAgentSchema,
-    SkillSchema,
-    SoulSchema,
-)
+from midas_agent.inference.schemas import GraphEmergenceArtifact
+from midas_agent.workspace.graph_emergence.agent import Agent, Soul
+from midas_agent.workspace.graph_emergence.skill import Skill
 
 
 @pytest.mark.unit
-class TestSoulSchema:
+class TestSoul:
     def test_roundtrip(self):
-        soul = SoulSchema(system_prompt="You are an expert.")
+        soul = Soul(system_prompt="You are an expert.")
         data = soul.model_dump()
-        restored = SoulSchema.model_validate(data)
+        restored = Soul.model_validate(data)
         assert restored.system_prompt == "You are an expert."
 
 
 @pytest.mark.unit
-class TestSkillSchema:
+class TestSkill:
     def test_roundtrip(self):
-        skill = SkillSchema(name="debug", description="Debugging", content="Steps...")
+        skill = Skill(name="debug", description="Debugging", content="Steps...")
         data = skill.model_dump()
-        restored = SkillSchema.model_validate(data)
+        restored = Skill.model_validate(data)
         assert restored.name == "debug"
         assert restored.description == "Debugging"
         assert restored.content == "Steps..."
 
 
 @pytest.mark.unit
-class TestFreeAgentSchema:
+class TestAgent:
     def test_roundtrip_with_skill(self):
-        fa = FreeAgentSchema(
+        agent = Agent(
             agent_id="fa-1",
-            soul=SoulSchema(system_prompt="prompt"),
-            skill=SkillSchema(name="s", description="d", content="c"),
-            price=1000,
-            bankruptcy_rate=0.1,
+            soul=Soul(system_prompt="prompt"),
+            agent_type="free",
+            skill=Skill(name="s", description="d", content="c"),
         )
-        data = fa.model_dump()
-        restored = FreeAgentSchema.model_validate(data)
+        data = agent.model_dump()
+        restored = Agent.model_validate(data)
         assert restored.agent_id == "fa-1"
-        assert restored.price == 1000
-        assert restored.bankruptcy_rate == 0.1
+        assert restored.agent_type == "free"
         assert restored.skill is not None
 
     def test_roundtrip_without_skill(self):
-        fa = FreeAgentSchema(
+        agent = Agent(
             agent_id="fa-2",
-            soul=SoulSchema(system_prompt="prompt"),
-            price=500,
-            bankruptcy_rate=0.0,
+            soul=Soul(system_prompt="prompt"),
+            agent_type="free",
         )
-        restored = FreeAgentSchema.model_validate(fa.model_dump())
+        restored = Agent.model_validate(agent.model_dump())
         assert restored.skill is None
-
-    def test_bankruptcy_rate_validation(self):
-        with pytest.raises(Exception):
-            FreeAgentSchema(
-                agent_id="fa-3",
-                soul=SoulSchema(system_prompt="p"),
-                price=100,
-                bankruptcy_rate=1.5,
-            )
 
 
 @pytest.mark.unit
 class TestGraphEmergenceArtifact:
     def _make_artifact(self) -> GraphEmergenceArtifact:
         return GraphEmergenceArtifact(
-            responsible_agent=ResponsibleAgentSchema(
-                soul=SoulSchema(system_prompt="responsible"),
+            responsible_agent=Agent(
+                agent_id="resp",
+                soul=Soul(system_prompt="responsible"),
+                agent_type="workspace_bound",
             ),
             free_agents=[
-                FreeAgentSchema(
+                Agent(
                     agent_id="fa-1",
-                    soul=SoulSchema(system_prompt="free-1"),
-                    skill=SkillSchema(name="nav", description="code nav", content="..."),
-                    price=1250,
-                    bankruptcy_rate=0.05,
+                    soul=Soul(system_prompt="free-1"),
+                    agent_type="free",
+                    skill=Skill(name="nav", description="code nav", content="..."),
                 ),
-                FreeAgentSchema(
+                Agent(
                     agent_id="fa-2",
-                    soul=SoulSchema(system_prompt="free-2"),
-                    price=3400,
-                    bankruptcy_rate=0.30,
+                    soul=Soul(system_prompt="free-2"),
+                    agent_type="free",
                 ),
             ],
+            agent_prices={"fa-1": 1250, "fa-2": 3400},
+            agent_bankruptcy_rates={"fa-1": 0.05, "fa-2": 0.30},
             budget_hint=58000,
         )
 
@@ -110,8 +96,10 @@ class TestGraphEmergenceArtifact:
 
     def test_empty_free_agents(self):
         artifact = GraphEmergenceArtifact(
-            responsible_agent=ResponsibleAgentSchema(
-                soul=SoulSchema(system_prompt="solo"),
+            responsible_agent=Agent(
+                agent_id="resp",
+                soul=Soul(system_prompt="solo"),
+                agent_type="workspace_bound",
             ),
             budget_hint=10000,
         )
