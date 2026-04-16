@@ -36,7 +36,7 @@ class TestMidasConfig:
         assert cfg.er_target == 0.1
         assert cfg.cool_down == 0.05
         assert cfg.mult_min == 0.5
-        assert cfg.mult_max == 5.0
+        assert cfg.mult_max == 50.0
         assert cfg.beta == 0.3
         assert cfg.eval_model == ""
         assert cfg.n_evict == 1

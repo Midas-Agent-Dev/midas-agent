@@ -13,7 +13,7 @@ class MidasConfig:
     er_target: float = 0.1
     cool_down: float = 0.05
     mult_min: float = 0.5
-    mult_max: float = 5.0
+    mult_max: float = 50.0
     beta: float = 0.3
     n_evict: int = 1
     max_iterations_free_agent: int = 50
@@ -31,4 +31,4 @@ class MidasConfig:
     execution_env: str = "local"
     # Context management
     max_tool_output_chars: int = 10000
-    max_context_tokens: int = 262144
+    max_context_tokens: int = 60000

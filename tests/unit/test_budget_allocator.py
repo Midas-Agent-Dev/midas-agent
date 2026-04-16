@@ -147,7 +147,7 @@ class TestAdaptiveMultiplier:
         assert result == pytest.approx(1.0 * 1.2 * 1.2)
 
     def test_adaptive_multiplier_strong_inflate(self):
-        """When 0.5 < ER < 1.0, multiplier inflates by 1.5×.
+        """When 0.5 < ER < 1.0, multiplier inflates by 1.3×.
 
         Design 03-05 §5.12.4: strong inflation zone.
         """
@@ -160,12 +160,12 @@ class TestAdaptiveMultiplier:
             mult_max=5.0,
         )
         result = am.update(eviction_rate=0.7)
-        assert result == pytest.approx(1.0 * 1.5)
+        assert result == pytest.approx(1.0 * 1.3)
 
     def test_adaptive_multiplier_emergency_double(self):
-        """When ER == 1.0 (all evicted), multiplier doubles (2.0×).
+        """When ER == 1.0 (all evicted), multiplier inflates by 1.5×.
 
-        Design 03-05 §5.12.4: emergency doubling zone.
+        Design 03-05 §5.12.4: emergency inflation zone.
         """
         am = AdaptiveMultiplier(
             mode="adaptive",
@@ -176,7 +176,7 @@ class TestAdaptiveMultiplier:
             mult_max=5.0,
         )
         result = am.update(eviction_rate=1.0)
-        assert result == pytest.approx(1.0 * 2.0)
+        assert result == pytest.approx(1.0 * 1.5)
 
     def test_adaptive_multiplier_zone_transitions(self):
         """Multiplier correctly transitions across all 5 zones in sequence.
@@ -205,11 +205,11 @@ class TestAdaptiveMultiplier:
         assert am.update(eviction_rate=0.4) == pytest.approx(v)
 
         # Zone 4: strong inflate
-        v *= 1.5
+        v *= 1.3
         assert am.update(eviction_rate=0.8) == pytest.approx(v)
 
-        # Zone 5: emergency double
-        v *= 2.0
+        # Zone 5: emergency inflate
+        v *= 1.5
         assert am.update(eviction_rate=1.0) == pytest.approx(v)
 
     def test_adaptive_multiplier_current_value(self):
@@ -324,9 +324,9 @@ class TestBudgetAllocator:
             mode="adaptive", init_value=1.0,
             er_target=0.1, cool_down=0.05, mult_min=0.5, mult_max=5.0,
         )
-        # Inflate multiplier: ER=1.0 → emergency double → multiplier=2.0
+        # Inflate multiplier: ER=1.0 → emergency inflate → multiplier=1.5
         am.update(eviction_rate=1.0)
-        assert am.current_value == pytest.approx(2.0)
+        assert am.current_value == pytest.approx(1.5)
 
         allocator = BudgetAllocator(
             score_floor=0.01,
@@ -338,8 +338,8 @@ class TestBudgetAllocator:
         allocations = allocator.calculate_allocation(etas, last_total_consumption=100000)
 
         total_allocated = sum(allocations.values())
-        # M_pool = 100000 × 2.0 = 200000
-        assert pytest.approx(total_allocated, rel=0.01) == 200000
+        # M_pool = 100000 × 1.5 = 150000
+        assert pytest.approx(total_allocated, rel=0.01) == 150000
 
     def test_calculate_allocation_not_hardcoded(self):
         """Allocation total must depend on last_total_consumption, not a constant.

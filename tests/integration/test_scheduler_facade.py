@@ -1274,7 +1274,7 @@ class TestGEModeAdaptiveMultiplier:
         )
 
     def test_ge_all_exhausted_emergency_double(self):
-        """GE mode, 2 workspaces, BOTH exhaust budget. ER=2/2=1.0 → ×2.0."""
+        """GE mode, 2 workspaces, BOTH exhaust budget. ER=2/2=1.0 → ×1.5."""
         config = MidasConfig(
             initial_budget=100,  # Extremely low
             workspace_count=2,
@@ -1329,8 +1329,8 @@ class TestGEModeAdaptiveMultiplier:
         eval_mod.evaluate_all.return_value = eval_results
         sch.evaluate_and_select({ws_id: "" for ws_id in ws_ids})
 
-        # ER = 2/2 = 1.0 → emergency double
-        assert am.current_value == pytest.approx(2.0), (
-            f"All workspaces exhausted: multiplier should double to 2.0, "
+        # ER = 2/2 = 1.0 → emergency inflate
+        assert am.current_value == pytest.approx(1.5), (
+            f"All workspaces exhausted: multiplier should inflate to 1.5, "
             f"got {am.current_value}"
         )

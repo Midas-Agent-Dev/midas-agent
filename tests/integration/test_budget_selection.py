@@ -264,28 +264,28 @@ class TestBudgetSelectionIntegration:
         result = am3.update(eviction_rate=0.3)
         assert pytest.approx(result, rel=1e-6) == 1.0 * 1.2
 
-        # Tier 4: ER=0.6 (high) => mult *= 1.5
+        # Tier 4: ER=0.6 (high) => mult *= 1.3
         am4 = AdaptiveMultiplier(
             mode="adaptive", init_value=1.0,
             er_target=0.1, cool_down=0.05, mult_min=0.5, mult_max=5.0,
         )
         result = am4.update(eviction_rate=0.6)
-        assert pytest.approx(result, rel=1e-6) == 1.0 * 1.5
+        assert pytest.approx(result, rel=1e-6) == 1.0 * 1.3
 
-        # Tier 5: ER=1.0 (maximum) => mult *= 2.0
+        # Tier 5: ER=1.0 (maximum) => mult *= 1.5
         am5 = AdaptiveMultiplier(
             mode="adaptive", init_value=1.0,
             er_target=0.1, cool_down=0.05, mult_min=0.5, mult_max=5.0,
         )
         result = am5.update(eviction_rate=1.0)
-        assert pytest.approx(result, rel=1e-6) == 1.0 * 2.0
+        assert pytest.approx(result, rel=1e-6) == 1.0 * 1.5
 
         # Clamping at mult_max: push above 5.0
         am_high = AdaptiveMultiplier(
             mode="adaptive", init_value=4.0,
             er_target=0.1, cool_down=0.05, mult_min=0.5, mult_max=5.0,
         )
-        result = am_high.update(eviction_rate=1.0)  # 4.0 * 2.0 = 8.0
+        result = am_high.update(eviction_rate=1.0)  # 4.0 * 1.5 = 6.0
         assert result == 5.0, "Must clamp at mult_max"
         assert am_high.current_value == 5.0
 

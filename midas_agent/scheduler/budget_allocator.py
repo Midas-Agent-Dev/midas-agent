@@ -40,8 +40,8 @@ class AdaptiveMultiplier:
         Zone 1: ER == 0.0        -> deflate by (1 - cool_down)
         Zone 2: 0 < ER <= target -> dead zone, no change
         Zone 3: target < ER <= 0.5 -> moderate inflate (* 1.2)
-        Zone 4: 0.5 < ER < 1.0  -> strong inflate (* 1.5)
-        Zone 5: ER == 1.0       -> emergency double (* 2.0)
+        Zone 4: 0.5 < ER < 1.0  -> strong inflate (* 1.3)
+        Zone 5: ER == 1.0       -> emergency inflate (* 1.5)
         """
         if self.mode == "static":
             self._value = self.init_value
@@ -59,10 +59,10 @@ class AdaptiveMultiplier:
             self._value *= 1.2
         elif eviction_rate < 1.0:
             # Zone 4: strong inflate
-            self._value *= 1.5
+            self._value *= 1.3
         else:
-            # Zone 5: ER == 1.0, emergency double
-            self._value *= 2.0
+            # Zone 5: ER == 1.0, emergency inflate
+            self._value *= 1.5
 
         # Clamp between bounds
         self._value = max(self.mult_min, min(self.mult_max, self._value))
