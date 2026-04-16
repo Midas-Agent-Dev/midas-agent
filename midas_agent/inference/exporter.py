@@ -1,6 +1,8 @@
 """Export training artifacts for production use."""
 from __future__ import annotations
 
+import os
+
 from midas_agent.inference.schemas import (
     GraphEmergenceArtifact,
 )
@@ -71,6 +73,7 @@ def export_graph_emergence(
         budget_hint=budget_hint,
     )
 
+    os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
     with open(output_path, "w") as f:
         f.write(artifact.model_dump_json(indent=2))
 

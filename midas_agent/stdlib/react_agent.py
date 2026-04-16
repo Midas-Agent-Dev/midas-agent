@@ -39,6 +39,7 @@ class ReactAgent:
         max_tool_output_chars: int | None = None,
         max_context_tokens: int | None = None,
         system_llm: Callable[[LLMRequest], LLMResponse] | None = None,
+        on_action: Callable | None = None,  # Callable[[ActionEvent], None]
     ) -> None:
         self.system_prompt = system_prompt
         self.actions = actions
@@ -48,6 +49,7 @@ class ReactAgent:
         self.max_tool_output_chars = max_tool_output_chars
         self.max_context_tokens = max_context_tokens
         self.system_llm = system_llm
+        self.on_action = on_action
         self._actions_by_name: dict[str, Action] = {a.name: a for a in actions}
 
     def _build_tools(self) -> list[dict] | None:
@@ -166,6 +168,14 @@ class ReactAgent:
                         timestamp=time.time(),
                     )
                     action_history.append(record)
+
+                    if action is not None and self.on_action is not None:
+                        from midas_agent.tui import ActionEvent
+                        self.on_action(ActionEvent(
+                            action_name=tool_call.name,
+                            arguments=tool_call.arguments,
+                            result=result,
+                        ))
 
                     # Add tool result message
                     tool_content = result
