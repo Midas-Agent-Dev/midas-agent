@@ -120,7 +120,7 @@ class TestPlanExecuteAgentTruncation:
         assert len(tool_content) < 15000, (
             f"Tool output should be truncated to ~10k but was {len(tool_content)}"
         )
-        assert "characters truncated" in tool_content
+        assert "characters were elided" in tool_content
 
     def test_plan_execute_no_truncation_when_not_set(self):
         """Without max_tool_output_chars, PlanExecuteAgent passes
@@ -158,7 +158,7 @@ class TestPlanExecuteAgentTruncation:
         tool_msgs = [m for m in second_call_msgs if m.get("role") == "tool"]
         tool_content = tool_msgs[0]["content"]
         # Should NOT be truncated
-        assert "characters truncated" not in tool_content
+        assert "characters were elided" not in tool_content
         assert len(tool_content) >= 50000
 
 
@@ -246,7 +246,7 @@ class TestWorkspaceTruncationWiring:
             f"Workspace should pass truncation config to agent, "
             f"but tool output was {len(content)} chars"
         )
-        assert "characters truncated" in content
+        assert "characters were elided" in content
 
 
 # ===========================================================================

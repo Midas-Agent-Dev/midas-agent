@@ -62,16 +62,16 @@ class TestOutputTruncation:
         text = "a" * 20000
         result = truncate_output(text, max_chars=10000)
 
-        assert "characters truncated" in result
+        assert "characters were elided" in result
 
     def test_truncation_marker_has_correct_count(self):
         """Elision marker reports approximately how many chars were removed."""
         text = "a" * 20000
         result = truncate_output(text, max_chars=10000)
 
-        # Parse the count from "...N characters truncated..."
+        # Parse the count from "...N characters were elided..."
         import re
-        m = re.search(r"\.\.\.(\d+) characters truncated\.\.\.", result)
+        m = re.search(r"(\d+) characters were elided", result)
         assert m is not None, f"No truncation marker found in: {result[:200]}"
         removed = int(m.group(1))
         # Should be approximately 10000 (20000 - 10000)
@@ -83,7 +83,7 @@ class TestOutputTruncation:
         text = "x" * 20000
         result = truncate_output(text, max_chars=10000)
 
-        parts = result.split("characters truncated")
+        parts = result.split("characters were elided")
         # Should have text before and after the marker
         assert len(parts) == 2
         head_part = parts[0]
@@ -124,7 +124,7 @@ class TestOutputTruncation:
         # Very small limit
         result = truncate_output(text, max_chars=100)
         assert len(result) < 500  # truncated + marker
-        assert "characters truncated" in result
+        assert "characters were elided" in result
 
 
 # ===========================================================================
@@ -181,7 +181,7 @@ class TestReactAgentTruncation:
                     assert len(content) < 15000, (
                         f"Tool output should be truncated but was {len(content)} chars"
                     )
-                    assert "characters truncated" in content
+                    assert "characters were elided" in content
                 return LLMResponse(
                     content=None,
                     tool_calls=[ToolCall(id="c2", name="task_done", arguments={})],

@@ -18,5 +18,10 @@ def truncate_output(text: str, max_chars: int = 10000) -> str:
     left = max_chars // 2
     right = max_chars - left
     removed = len(text) - left - right
-    marker = f"\n...{removed} characters truncated...\n"
+    marker = (
+        f"\n<response clipped>\n"
+        f"<NOTE>{removed} characters were elided. "
+        f"Use head/tail/grep to get specific parts, "
+        f"or redirect output to a file.</NOTE>\n"
+    )
     return text[:left] + marker + text[len(text) - right:]
