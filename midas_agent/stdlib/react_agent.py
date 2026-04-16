@@ -29,6 +29,43 @@ class AgentResult:
 
 
 class ReactAgent:
+    @staticmethod
+    def _check_stuck(action_history: list[ActionRecord]) -> str | None:
+        """Return a warning string if the agent appears stuck, else None."""
+        if len(action_history) < 3:
+            return None
+
+        # Rule 1: Same file edited 3+ times (anywhere in history)
+        from collections import Counter
+        edit_counts: Counter[str] = Counter()
+        for rec in action_history:
+            if rec.action_name == "edit_file":
+                path = rec.arguments.get("path", "")
+                if path:
+                    edit_counts[path] += 1
+        for path, count in edit_counts.items():
+            if count >= 3:
+                return (
+                    f"\u26a0 You have edited {path} {count} times without resolving the issue. "
+                    "Your current approach may be wrong. Use the think tool to re-read the "
+                    "issue description, reconsider the root cause, and try a completely "
+                    "different approach."
+                )
+
+        # Rule 2: Last 3 actions have identical action_name AND arguments
+        last3 = action_history[-3:]
+        if (
+            last3[0].action_name == last3[1].action_name == last3[2].action_name
+            and last3[0].arguments == last3[1].arguments == last3[2].arguments
+        ):
+            return (
+                f"\u26a0 You have repeated the same action ({last3[0].action_name}) with identical "
+                "arguments 3 times in a row. You appear to be stuck. Use the think tool "
+                "to reconsider your approach and try something different."
+            )
+
+        return None
+
     def __init__(
         self,
         system_prompt: str,
@@ -210,6 +247,11 @@ class ReactAgent:
                             termination_reason="done",
                             action_history=action_history,
                         )
+
+                # Check if agent is stuck
+                stuck_msg = ReactAgent._check_stuck(action_history)
+                if stuck_msg:
+                    messages.append({"role": "user", "content": stuck_msg})
 
                 # Compaction check after processing all tool calls
                 if self.max_context_tokens and self.system_llm:
