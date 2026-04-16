@@ -192,7 +192,7 @@ class DelegateTaskAction(Action):
         return result
 
     def execute(self, **kwargs) -> str:
-        task_description = kwargs["task_description"]
+        task_description = kwargs.get("task_description") or kwargs.get("task") or ""
         spawn = kwargs.get("spawn", False)
 
         # Backward compat: spawn=True treated as spawn=[task_description]
@@ -267,8 +267,16 @@ class DelegateTaskAction(Action):
                 def on_report(text, _reported=reported):
                     _reported["result"] = text
 
+                # Inject skill content into system prompt if available
+                system_prompt = target.soul.system_prompt
+                skill = getattr(target, "skill", None)
+                if skill is not None:
+                    system_prompt += (
+                        "\n\n## Skill Instructions\n" + skill.content
+                    )
+
                 sub_agent = ReactAgent(
-                    system_prompt=target.soul.system_prompt,
+                    system_prompt=system_prompt,
                     actions=self._build_sub_agent_actions(
                         target.protected_by,
                         report_callback=on_report,

@@ -498,8 +498,8 @@ class TestIT68PostEpisodeSkillReviewer:
 
         result = ws.post_episode(eval_results, evicted_ids=[])
 
-        # SkillReviewer.review() was called with the eval_results
-        skill_reviewer.review.assert_called_once_with(eval_results)
+        # SkillReviewer.review() was called with the responsible agent, eval_results, and action_history
+        skill_reviewer.review.assert_called_once_with(responsible_agent, eval_results, [])
 
         # post_episode returns None for GraphEmergenceWorkspace
         assert result is None

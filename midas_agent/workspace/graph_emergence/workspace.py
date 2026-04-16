@@ -192,5 +192,8 @@ class GraphEmergenceWorkspace(Workspace):
 
     def post_episode(self, eval_results: dict, evicted_ids: list[str]) -> None:
         self.calls.append(("post_episode", {"eval_results": eval_results, "evicted_ids": evicted_ids}))
-        self._skill_reviewer.review(eval_results)
+        action_history = []
+        if self._last_result is not None and hasattr(self._last_result, "action_history"):
+            action_history = self._last_result.action_history
+        self._skill_reviewer.review(self._responsible_agent, eval_results, action_history)
         return None

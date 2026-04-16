@@ -32,3 +32,4 @@ class MidasConfig:
     # Context management
     max_tool_output_chars: int = 10000
     max_context_tokens: int = 60000
+    skill_evolution: bool = True

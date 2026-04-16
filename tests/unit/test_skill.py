@@ -1,11 +1,29 @@
 """Unit tests for Skill and SkillReviewer."""
+import json
 from unittest.mock import MagicMock
 
 import pytest
 
+from midas_agent.workspace.graph_emergence.agent import Agent, Soul
 from midas_agent.workspace.graph_emergence.skill import Skill, SkillReviewer
 from midas_agent.workspace.graph_emergence.free_agent_manager import FreeAgentManager
 from midas_agent.llm.types import LLMRequest, LLMResponse, TokenUsage
+from midas_agent.stdlib.react_agent import ActionRecord
+
+
+def _make_agent(skill: Skill | None = None) -> Agent:
+    return Agent(
+        agent_id="free-1",
+        soul=Soul(system_prompt="You are a helper."),
+        agent_type="free",
+        skill=skill,
+    )
+
+
+def _make_action_history() -> list[ActionRecord]:
+    return [
+        ActionRecord(action_name="search_code", arguments={"pattern": "bug"}, result="Found 2 matches", timestamp=1.0),
+    ]
 
 
 @pytest.mark.unit
@@ -43,8 +61,10 @@ class TestSkill:
 class TestSkillReviewer:
     """Tests for the SkillReviewer class."""
 
-    def _make_system_llm(self, content: str = "updated skill"):
-        """Create a fake system_llm callback."""
+    def _make_system_llm(self, content: str | None = None):
+        """Create a fake system_llm callback that returns valid skill JSON."""
+        if content is None:
+            content = json.dumps({"name": "debug", "description": "Debugging", "content": "Use pdb."})
         return MagicMock(
             return_value=LLMResponse(
                 content=content,
@@ -73,13 +93,14 @@ class TestSkillReviewer:
             free_agent_manager=free_agent_manager,
         )
 
+        agent = _make_agent(skill=None)
         eval_results = {
             "agent_id": "free-1",
-            "score": 0.85,
+            "s_exec": 0.85,
             "summary": "Handled task well",
         }
 
-        reviewer.review(eval_results)  # Should not raise
+        reviewer.review(agent, eval_results, _make_action_history())  # Should not raise
 
     def test_skill_reviewer_updates_embeddings(self):
         """review() triggers FreeAgentManager.update_embedding for the agent."""
@@ -90,12 +111,13 @@ class TestSkillReviewer:
             free_agent_manager=free_agent_manager,
         )
 
+        agent = _make_agent(skill=None)
         eval_results = {
             "agent_id": "free-1",
-            "score": 0.9,
+            "s_exec": 0.9,
             "summary": "Excellent work",
         }
 
-        reviewer.review(eval_results)
+        reviewer.review(agent, eval_results, _make_action_history())
 
         free_agent_manager.update_embedding.assert_called()

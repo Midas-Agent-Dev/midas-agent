@@ -50,5 +50,8 @@ class FreeAgentManager:
         self._agents[agent.agent_id] = agent
 
     def update_embedding(self, agent_id: str) -> None:
-        # Placeholder for actual embedding update logic.
-        pass
+        # If agent not found, just return (don't crash)
+        if agent_id not in self._agents:
+            return
+        # For now, the word-overlap matching in match() already uses skill.description.
+        # No additional embedding computation needed for the current matching heuristic.
