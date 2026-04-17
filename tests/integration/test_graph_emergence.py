@@ -517,7 +517,8 @@ class TestIT68PostEpisodeSkillReviewer:
         skill_reviewer.review.assert_called_once()
         call_args = skill_reviewer.review.call_args
         assert call_args[0][0] == responsible_agent
-        assert call_args[0][1] == eval_results
+        # post_episode extracts workspace's own results from nested dict
+        assert call_args[0][1] == {"s_exec": 0.85, "s_w": 0.85}
         action_history = call_args[0][2]
         assert len(action_history) >= 1, (
             f"action_history should be populated after execute(), got: {action_history}"

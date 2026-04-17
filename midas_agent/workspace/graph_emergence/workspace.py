@@ -217,5 +217,11 @@ class GraphEmergenceWorkspace(Workspace):
         action_history = []
         if self._last_result is not None and hasattr(self._last_result, "action_history"):
             action_history = self._last_result.action_history
-        self._skill_reviewer.review(self._responsible_agent, eval_results, action_history)
+        # Extract this workspace's results from the nested dict
+        ws_results = eval_results.get(self.workspace_id, eval_results)
+        self._skill_reviewer.review(self._responsible_agent, ws_results, action_history)
+        # Also review free agents that participated (spawned by this workspace)
+        for agent in self._free_agent_manager.free_agents.values():
+            if getattr(agent, "protected_by", None) == self._responsible_agent.agent_id:
+                self._skill_reviewer.review(agent, ws_results, action_history)
         return None
