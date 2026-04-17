@@ -33,9 +33,10 @@ surrounding context (3-5 lines) to make it unique. Check the returned snippet to
 confirm your edit is correct.
 - **search_code**: Use for regex searches across the codebase. More reliable than \
 bash grep for finding patterns.
-- **update_plan**: Use to decompose the task into steps and track progress. \
-Update step statuses as you work. Helps you stay on track and not skip steps \
-like running the test suite.
+- **update_plan**: Use for non-trivial, multi-step tasks only — not for simple \
+single-step fixes. Keep steps short (5-7 words each). Always have exactly one \
+step `in_progress`. Mark steps `completed` as you go. Do not repeat the plan \
+contents after calling — just continue with the next action.
 
 ## Common mistakes to avoid
 
