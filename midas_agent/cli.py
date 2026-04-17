@@ -8,6 +8,14 @@ import sys
 from midas_agent.stdlib.action import Action
 
 
+def _nonneg_int(value: str) -> int:
+    """Argparse type: non-negative integer."""
+    i = int(value)
+    if i < 0:
+        raise argparse.ArgumentTypeError(f"must be non-negative, got {i}")
+    return i
+
+
 def parse_args(argv: list[str]) -> argparse.Namespace:
     """Parse CLI arguments with train/infer subcommands."""
     parser = argparse.ArgumentParser(prog="midas", description="Midas Agent CLI")
@@ -21,11 +29,18 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         default=".midas/agents/",
         help="Output directory for artifacts (default: .midas/agents/)",
     )
-    train_parser.add_argument(
+    issue_group = train_parser.add_mutually_exclusive_group()
+    issue_group.add_argument(
         "--issues",
         type=int,
         default=None,
         help="Number of issues to train on (default: all)",
+    )
+    issue_group.add_argument(
+        "--issue-index",
+        type=_nonneg_int,
+        default=None,
+        help="Train on a single issue by its 0-based index in the dataset",
     )
 
     # -- infer subcommand --
@@ -124,6 +139,11 @@ def _cmd_train(args: argparse.Namespace) -> None:
     issues = load_swe_bench()
     if args.issues is not None:
         issues = issues[: args.issues]
+    elif args.issue_index is not None:
+        if args.issue_index >= len(issues):
+            print(f"Error: --issue-index {args.issue_index} is out of range (dataset has {len(issues)} issues)")
+            sys.exit(1)
+        issues = [issues[args.issue_index]]
 
     print(f"Training: {len(issues)} issues, budget={config.initial_budget}")
     run_training(config, issues=issues)
