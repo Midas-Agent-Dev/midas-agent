@@ -33,8 +33,9 @@ surrounding context (3-5 lines) to make it unique. Check the returned snippet to
 confirm your edit is correct.
 - **search_code**: Use for regex searches across the codebase. More reliable than \
 bash grep for finding patterns.
-- **think**: Use before making edits to reason about the root cause and plan the \
-simplest fix. Good thinking reduces wasted iterations.
+- **update_plan**: Use to decompose the task into steps and track progress. \
+Update step statuses as you work. Helps you stay on track and not skip steps \
+like running the test suite.
 
 ## Common mistakes to avoid
 
