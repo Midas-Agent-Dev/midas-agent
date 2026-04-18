@@ -83,7 +83,7 @@ class SWEBenchScorer(ExecutionScorer):
             UTF8,
             RUN_EVALUATION_LOG_DIR,
         )
-        from swebench.harness.grading import GIT_APPLY_CMDS
+        from swebench.harness.run_evaluation import GIT_APPLY_CMDS
 
         instance_id = test_spec.instance_id
 
