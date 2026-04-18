@@ -20,8 +20,8 @@ Guidelines:
 """
 
 # Tool sets per role
-_EXPLORER_TOOLS = {"bash", "read_file", "search_code", "find_files", "report_result"}
-_WORKER_TOOLS = {"bash", "read_file", "edit_file", "write_file", "search_code", "find_files", "report_result"}
+_EXPLORER_TOOLS = {"bash", "str_replace_editor", "search_code", "find_files", "report_result"}
+_WORKER_TOOLS = {"bash", "str_replace_editor", "search_code", "find_files", "report_result"}
 
 
 class DelegateTaskAction(Action):
