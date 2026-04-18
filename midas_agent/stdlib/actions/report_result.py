@@ -42,6 +42,6 @@ class ReportResultAction(Action):
         }
 
     def execute(self, **kwargs) -> str:
-        result = kwargs["result"]
+        result = kwargs.get("result") or kwargs.get("summary") or str(kwargs) or "(no result provided)"
         self._report(result)
-        return f"Result reported."
+        return "Result reported."
