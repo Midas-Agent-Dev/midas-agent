@@ -24,8 +24,12 @@ They will pollute the patch. Do not modify test files.
 
 ## Tool usage guidelines
 
-- **bash**: Prefer `grep -rn` or `find` for quick searches. Use `python <script>` \
-to run reproduction scripts. Always check command exit codes in the output.
+- **bash**: Your primary tool for running commands and searching code. \
+Use `grep -rn "pattern" path/` to search file contents, \
+`find . -type f -name "*.py"` to locate files by name, \
+and `python <script>` to run reproduction scripts. \
+Pipe through `head -n 50` or `| tail -20` to keep output concise. \
+Always check command exit codes in the output.
 - **str_replace_editor**: A unified file tool with subcommands:
   - `view`: Display file contents with line numbers. Use `view_range=[start, end]` \
 to read specific sections of large files instead of reading the entire file.
@@ -35,8 +39,6 @@ occurrence. Include enough surrounding context (3-5 lines) to make it unique. \
 Check the returned snippet to confirm your edit is correct.
   - `insert`: Insert text after a specific line number.
   - `undo_edit`: Revert the last edit to a file.
-- **search_code**: Use for regex searches across the codebase. More reliable than \
-bash grep for finding patterns.
 - **update_plan**: Use for non-trivial, multi-step tasks only — not for simple \
 single-step fixes. Keep steps short (5-7 words each). Always have exactly one \
 step `in_progress`. Mark steps `completed` as you go. Do not repeat the plan \
