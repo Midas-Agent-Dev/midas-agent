@@ -100,8 +100,10 @@ class TestRunTraining:
         config = self._make_config(workspace_count=2)
         issues = self._make_issues(1)
 
-        # Should complete without error using the stub LLM.
-        run_training(config, issues=issues)
+        # Mock the SWE-bench scorer since we use fake issue IDs
+        # that don't exist in the real SWE-bench dataset.
+        with patch("midas_agent.evaluation.swebench_scorer.SWEBenchScorer.score", return_value=0.0):
+            run_training(config, issues=issues)
 
 
 @pytest.mark.unit
