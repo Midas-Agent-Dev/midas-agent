@@ -100,7 +100,15 @@ class PlanExecuteAgent(ReactAgent):
                 messages.append(assistant_msg)
 
                 for tool_call in response.tool_calls:
-                    action = self._actions_by_name[tool_call.name]
+                    action = self._actions_by_name.get(tool_call.name)
+                    if action is None:
+                        logger.warning("  [iter %d] Unknown tool: %s", iterations, tool_call.name[:80])
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": f"Error: unknown tool '{tool_call.name}'. Available tools: {', '.join(self._actions_by_name.keys())}",
+                        })
+                        continue
                     logger.info(
                         "  [iter %d] %s(%s) (%d tokens)",
                         iterations,
