@@ -65,29 +65,16 @@ def build_action_set(cwd: str, env: str = "local") -> list[Action]:
     runtime when a container is available.
     """
     from midas_agent.stdlib.actions.bash import BashAction
-    from midas_agent.stdlib.actions.file_ops import (
-        EditFileAction,
-        ReadFileAction,
-        WriteFileAction,
-    )
+    from midas_agent.stdlib.actions.str_replace_editor import StrReplaceEditorAction
     from midas_agent.stdlib.actions.search import FindFilesAction, SearchCodeAction
     from midas_agent.stdlib.actions.task_done import TaskDoneAction
     from midas_agent.stdlib.actions.update_plan import UpdatePlanAction
 
-    io = None
-    if env == "docker":
-        from midas_agent.runtime.io_backend import DockerIO
-        # Docker IO requires a container_id; use a placeholder for now.
-        # The real container_id is set at runtime before any action executes.
-        io = DockerIO(container_id="", workdir=cwd)
-
     return [
-        BashAction(cwd=cwd, io=io),
-        ReadFileAction(cwd=cwd, io=io),
-        EditFileAction(cwd=cwd, io=io),
-        WriteFileAction(cwd=cwd, io=io),
-        SearchCodeAction(cwd=cwd, io=io),
-        FindFilesAction(cwd=cwd, io=io),
+        BashAction(cwd=cwd),
+        StrReplaceEditorAction(cwd=cwd),
+        SearchCodeAction(cwd=cwd),
+        FindFilesAction(cwd=cwd),
         UpdatePlanAction(),
         TaskDoneAction(),
     ]
