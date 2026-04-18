@@ -50,7 +50,9 @@ class SWEBenchTestRunner:
 
         import shlex
         test_args = " ".join(shlex.quote(t) for t in all_tests)
-        cmd = f"python -m pytest {test_args} --tb=short -q 2>&1"
+        # Use --tb=line for minimal output and pipe through tail to get
+        # only the summary line. This avoids truncation from max_tool_output_chars.
+        cmd = f"python -m pytest {test_args} --tb=line -q 2>&1 | tail -5"
         output = self._bash.execute(command=cmd)
 
         return self._parse_output(output, len(all_tests))
