@@ -188,13 +188,12 @@ class GraphEmergenceWorkspace(Workspace):
         - Docker: action_overrides has a "bash" DockerBashAction, runs git
           inside the container.
         """
-        # Try Docker mode first (all ops inside container)
-        docker_bash = self._action_overrides.get("bash")
-        if docker_bash is not None and hasattr(docker_bash, "_container_id"):
+        # Try IO backend mode first (Docker or other remote)
+        if self._io is not None:
             try:
-                docker_bash.execute(command="git add -A")
-                result = docker_bash.execute(command="git diff --cached")
-                docker_bash.execute(command="git reset")
+                self._io.run_bash("git add -A")
+                result = self._io.run_bash("git diff --cached")
+                self._io.run_bash("git reset")
                 return result
             except Exception:
                 pass
