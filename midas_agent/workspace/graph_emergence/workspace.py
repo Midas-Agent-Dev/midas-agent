@@ -12,7 +12,6 @@ from midas_agent.llm.types import LLMRequest, LLMResponse
 from midas_agent.stdlib.actions.bash import BashAction
 from midas_agent.stdlib.actions.delegate_task import DelegateTaskAction
 from midas_agent.stdlib.actions.str_replace_editor import StrReplaceEditorAction
-from midas_agent.stdlib.actions.search import FindFilesAction, SearchCodeAction
 from midas_agent.stdlib.actions.task_done import TaskDoneAction
 from midas_agent.stdlib.actions.update_plan import UpdatePlanAction
 from midas_agent.stdlib.plan_execute_agent import PlanExecuteAgent
@@ -80,8 +79,6 @@ class GraphEmergenceWorkspace(Workspace):
         base_actions = [
             ov.get("bash", BashAction(cwd=cwd, io=io)),
             ov.get("str_replace_editor", StrReplaceEditorAction(cwd=cwd, io=io)),
-            ov.get("search_code", SearchCodeAction(cwd=cwd, io=io)),
-            ov.get("find_files", FindFilesAction(cwd=cwd, io=io)),
         ]
 
         # Build environment context (replaces _build_market_info)

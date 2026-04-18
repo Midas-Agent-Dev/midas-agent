@@ -120,7 +120,6 @@ class WorkspaceManager:
         from midas_agent.stdlib.action import ActionRegistry
         from midas_agent.stdlib.actions.bash import BashAction
         from midas_agent.stdlib.actions.str_replace_editor import StrReplaceEditorAction
-        from midas_agent.stdlib.actions.search import FindFilesAction, SearchCodeAction
         from midas_agent.stdlib.actions.task_done import TaskDoneAction
         from midas_agent.workspace.config_evolution.config_schema import (
             ConfigMeta,
@@ -139,8 +138,6 @@ class WorkspaceManager:
         all_actions = [
             BashAction(),
             StrReplaceEditorAction(),
-            SearchCodeAction(),
-            FindFilesAction(),
             TaskDoneAction(),
         ]
         registry = ActionRegistry(all_actions)

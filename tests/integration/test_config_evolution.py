@@ -15,12 +15,7 @@ from midas_agent.llm.types import LLMResponse, TokenUsage, ToolCall
 from midas_agent.scheduler.resource_meter import BudgetExhaustedError
 from midas_agent.stdlib.action import Action, ActionRegistry
 from midas_agent.stdlib.actions.bash import BashAction
-from midas_agent.stdlib.actions.file_ops import (
-    EditFileAction,
-    ReadFileAction,
-    WriteFileAction,
-)
-from midas_agent.stdlib.actions.search import FindFilesAction, SearchCodeAction
+from midas_agent.stdlib.actions.str_replace_editor import StrReplaceEditorAction
 from midas_agent.stdlib.actions.task_done import TaskDoneAction
 from midas_agent.stdlib.react_agent import AgentResult, ReactAgent
 from midas_agent.types import Issue
@@ -71,11 +66,7 @@ def _all_actions() -> list[Action]:
     """Return one instance of every standard action."""
     return [
         BashAction(),
-        ReadFileAction(),
-        EditFileAction(),
-        WriteFileAction(),
-        SearchCodeAction(),
-        FindFilesAction(),
+        StrReplaceEditorAction(),
         TaskDoneAction(),
     ]
 
@@ -621,12 +612,12 @@ class TestReactAgentIterationLimit:
         # Every response is a tool call — the agent should never "finish"
         # naturally but instead hit the iteration cap.
         responses = [
-            _tool_response("read_file", {"path": "a.py"}, f"c{i}")
+            _tool_response("str_replace_editor", {"command": "view", "path": "a.py"}, f"c{i}")
             for i in range(10)  # more than enough
         ]
         provider = FakeLLMProvider(responses=responses)
 
-        actions = [ReadFileAction()]
+        actions = [StrReplaceEditorAction()]
         agent = ReactAgent(
             system_prompt="You are a code assistant.",
             actions=actions,
@@ -644,13 +635,13 @@ class TestReactAgentIterationLimit:
         """When max_iterations is None the agent runs until it produces a
         text response (termination_reason='done')."""
         responses = [
-            _tool_response("read_file", {"path": "a.py"}, "c1"),
-            _tool_response("read_file", {"path": "b.py"}, "c2"),
+            _tool_response("str_replace_editor", {"command": "view", "path": "a.py"}, "c1"),
+            _tool_response("str_replace_editor", {"command": "view", "path": "b.py"}, "c2"),
             _text_response("All done."),
         ]
         provider = FakeLLMProvider(responses=responses)
 
-        actions = [ReadFileAction()]
+        actions = [StrReplaceEditorAction()]
         agent = ReactAgent(
             system_prompt="You are a code assistant.",
             actions=actions,
@@ -687,18 +678,18 @@ class TestReadFilePathHallucination:
         with open(target, "w") as f:
             f.write("# separable module\ndef is_separable():\n    pass\n")
 
-        action = ReadFileAction(cwd=cwd)
+        action = StrReplaceEditorAction(cwd=cwd)
 
-        result = action.execute(path="./astropy/modeling/separable.py")
+        result = action.execute(command="view", path="./astropy/modeling/separable.py")
 
         assert "File not found" not in result
         assert "is_separable" in result
 
     def test_tool_description_does_not_include_cwd(self):
         """The cwd is now provided via EnvironmentContext, not the tool
-        description. ReadFileAction description should be clean."""
+        description. StrReplaceEditorAction description should be clean."""
         cwd = "/var/midas/ws-0/astropy__astropy-12907"
-        action = ReadFileAction(cwd=cwd)
+        action = StrReplaceEditorAction(cwd=cwd)
 
         agent = ReactAgent(
             system_prompt="test",

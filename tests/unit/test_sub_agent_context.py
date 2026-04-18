@@ -4,8 +4,7 @@ import pytest
 from midas_agent.llm.types import LLMRequest, LLMResponse, TokenUsage, ToolCall
 from midas_agent.stdlib.actions.delegate_task import DelegateTaskAction
 from midas_agent.stdlib.actions.bash import BashAction
-from midas_agent.stdlib.actions.file_ops import ReadFileAction
-from midas_agent.stdlib.actions.search import SearchCodeAction, FindFilesAction
+from midas_agent.stdlib.actions.str_replace_editor import StrReplaceEditorAction
 from midas_agent.stdlib.actions.task_done import TaskDoneAction
 from midas_agent.stdlib.actions.report_result import ReportResultAction
 
@@ -41,9 +40,7 @@ class TestSubAgentGetsParentSystemPrompt:
         parent_system_prompt = "You are a coding agent that solves issues..."
         parent_actions = [
             BashAction(cwd="/testbed"),
-            ReadFileAction(cwd="/testbed"),
-            SearchCodeAction(cwd="/testbed"),
-            FindFilesAction(cwd="/testbed"),
+            StrReplaceEditorAction(cwd="/testbed"),
             TaskDoneAction(),
         ]
 
@@ -93,9 +90,7 @@ class TestSubAgentGetsEnvironmentContext:
 
         parent_actions = [
             BashAction(cwd="/testbed"),
-            ReadFileAction(cwd="/testbed"),
-            SearchCodeAction(cwd="/testbed"),
-            FindFilesAction(cwd="/testbed"),
+            StrReplaceEditorAction(cwd="/testbed"),
             TaskDoneAction(),
         ]
 
@@ -152,7 +147,7 @@ class TestSubAgentMaxIterations:
 
         parent_actions = [
             BashAction(cwd="/testbed"),
-            ReadFileAction(cwd="/testbed"),
+            StrReplaceEditorAction(cwd="/testbed"),
             TaskDoneAction(),
         ]
 

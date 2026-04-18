@@ -14,7 +14,6 @@ from midas_agent.llm.types import LLMRequest, LLMResponse, TokenUsage, ToolCall
 from midas_agent.stdlib.actions.bash import BashAction
 from midas_agent.stdlib.actions.delegate_task import DelegateTaskAction
 from midas_agent.stdlib.actions.str_replace_editor import StrReplaceEditorAction
-from midas_agent.stdlib.actions.search import SearchCodeAction, FindFilesAction
 from midas_agent.stdlib.actions.task_done import TaskDoneAction
 from midas_agent.workspace.graph_emergence.agent import Agent, Soul
 from midas_agent.workspace.graph_emergence.free_agent_manager import FreeAgentManager
@@ -46,8 +45,6 @@ def _parent_actions():
     return [
         BashAction(),
         StrReplaceEditorAction(),
-        SearchCodeAction(),
-        FindFilesAction(),
         TaskDoneAction(),
         DelegateTaskAction(find_candidates=lambda d: []),
     ]

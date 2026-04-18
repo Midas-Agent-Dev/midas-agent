@@ -15,7 +15,6 @@ from midas_agent.stdlib.actions.bash import BashAction
 from midas_agent.stdlib.actions.delegate_task import DelegateTaskAction
 from midas_agent.stdlib.actions.str_replace_editor import StrReplaceEditorAction
 from midas_agent.stdlib.actions.report_result import ReportResultAction
-from midas_agent.stdlib.actions.search import SearchCodeAction, FindFilesAction
 from midas_agent.stdlib.actions.task_done import TaskDoneAction
 from midas_agent.workspace.graph_emergence.agent import Agent, Soul
 from midas_agent.workspace.graph_emergence.free_agent_manager import FreeAgentManager
@@ -50,8 +49,6 @@ def _make_parent_actions():
     return [
         BashAction(),
         StrReplaceEditorAction(),
-        SearchCodeAction(),
-        FindFilesAction(),
         TaskDoneAction(),
         DelegateTaskAction(find_candidates=lambda d: []),
     ]
@@ -340,8 +337,6 @@ class TestSubAgentUsesTools:
         parent_actions = [
             BashAction(cwd=str(tmp_path)),
             StrReplaceEditorAction(cwd=str(tmp_path)),
-            SearchCodeAction(cwd=str(tmp_path)),
-            FindFilesAction(cwd=str(tmp_path)),
             TaskDoneAction(),
             DelegateTaskAction(find_candidates=lambda d: []),
         ]
