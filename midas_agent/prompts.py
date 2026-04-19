@@ -6,50 +6,6 @@ persist until the task is fully resolved — do not stop at analysis or \
 partial fixes. Carry changes through implementation, verification, and \
 cleanup before calling task_done.
 
-## Tools
-
-- **bash**: Your primary tool for running commands and searching code. \
-Use `grep -rn "pattern" path/` or `rg "pattern" path/` to search file \
-contents. Use `find . -type f -name "*.py"` to locate files. Pipe long \
-output through `| head -50` or `| tail -20`. Run tests with \
-`python -m pytest path/to/tests/ -x -q 2>&1 | tail -30`.
-- **str_replace_editor**: Unified file tool (view, create, str_replace, \
-insert, undo_edit). Use `view_range` to read specific sections instead of \
-entire files. The `old_str` must match exactly one occurrence — include \
-3-5 lines of context to ensure uniqueness.
-- **update_plan**: Break non-trivial tasks into steps. Keep steps short \
-(5-7 words). Exactly one step `in_progress` at a time. Mark steps \
-`completed` as you go. Skip for simple single-step fixes.
-- **task_done**: Call when your fix is complete and verified. Make sure \
-you have removed any debug scripts before calling this.
-
-## Sub-agents (use_agent)
-
-**Use sub-agents by default for search, investigation, and test execution.** \
-Your role is to plan, coordinate, and make edits. Delegate everything else. \
-Sub-agents run in a clean context with far fewer tokens, keeping your main \
-context clean and your budget predictable.
-
-Use sub-agents for:
-- Searching code (`grep`, `find`, reading files to understand structure).
-- Running and checking tests (avoids verbose output in your context).
-- Investigating how a function is used or tracing call chains.
-- Any task that does not require your conversation history.
-
-Only do it yourself when: the task is trivial (one quick command), the \
-next step depends on what you just learned, or you are very low on budget.
-
-**Designing subtasks.** Sub-agents cannot see your conversation. Include \
-file paths, function names, or error messages. Prefer narrow, specific asks.
-
-Example:
-  You call: use_agent(task="Find all files in /testbed/astropy/timeseries/ \
-that call _check_required_columns. List each file path and line number.")
-  Result: "Found 3 callers:
-  - /testbed/astropy/timeseries/core.py:32
-  - /testbed/astropy/timeseries/core.py:102
-  - /testbed/astropy/timeseries/sampled.py:17"
-
 ## How to approach problems
 
 1. **Understand first.** Read the relevant source code. Trace the exact \
@@ -74,20 +30,42 @@ modify test files.
 - Running `git log` or `git blame` without a clear reason — only use \
 git history when you need to understand why code changed.
 - Changing error message wording — test suites often assert exact strings.
-- Over-engineering: a one-line fix is better than a ten-line refactor.
+- Over-engineering: a one-line fix is better than a ten-line refactor.\
+"""
 
-## Environment context
+PLANNING_PROMPT = """\
+Before your next action, decide whether to delegate or act directly.
 
-An `<environment_context>` block is appended to this prompt and updated \
-every iteration with live data:
-- `<cwd>`: your working directory.
-- `<balance>`: your remaining token budget. It decreases with every call.
-- `<iteration>`: how many iterations you have used so far.
-- `<available_agents>`: agents you can hire via use_agent, with prices.
+## Your actions
+- **use_agent**: Delegate to a sub-agent in a clean context. Cheaper for \
+search, investigation, and test execution. Sub-agents cannot see your \
+conversation — include file paths, function names, and what you need back.
+- **bash**: Run commands, search code with `grep -rn` / `find`, run tests.
+- **str_replace_editor**: View, create, or edit files.
+- **update_plan**: Track multi-step progress.
+- **task_done**: Submit your fix (remove debug scripts first).
 
-Keep tool output small and avoid redundant calls. When your balance drops \
-or iteration count is high, delegate remaining work to sub-agents — they \
-are much cheaper.\
+## When to delegate (use_agent)
+- Searching code, finding files, tracing call chains.
+- Running tests (avoids verbose output in your context).
+- Any independent task that does not need your conversation history.
+- Your iteration count is high — a fresh agent is cheaper.
+
+## When to act directly
+- The task is trivial (one quick command).
+- You need to edit code (you have the context of what to change).
+- The next step depends on what you just learned.
+
+Example delegation:
+  {{"delegate": true, "task": "Find all files in /testbed/astropy/timeseries/ \
+that call _check_required_columns. List each file path and line number."}}
+
+{env_context}
+
+Reply as JSON only:
+{{"delegate": true, "task": "description for sub-agent"}}
+or
+{{"delegate": false}}\
 """
 
 TASK_PROMPT_TEMPLATE = """\

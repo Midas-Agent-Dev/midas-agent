@@ -40,8 +40,8 @@ class PlanExecuteAgent(ReactAgent):
         self._env_cwd = env_cwd
         self._env_agents = env_agents or []
 
-    def _build_system_prompt(self, iteration: int) -> str:
-        """Build system prompt with live environment context."""
+    def _build_env_context_xml(self, iteration: int) -> str:
+        """Build environment context XML with live data."""
         from midas_agent.context.environment import EnvironmentContext
 
         balance = self.balance_provider() if self.balance_provider else None
@@ -52,20 +52,115 @@ class PlanExecuteAgent(ReactAgent):
             iteration=iteration,
             available_agents=self._env_agents,
         )
-        return self.system_prompt + "\n\n" + env.serialize_to_xml()
+        return env.serialize_to_xml()
+
+    def _planning_step(self, messages: list[dict], iteration: int) -> bool:
+        """Ask the LLM whether to delegate. Returns True if delegate."""
+        import json as _json
+        from midas_agent.prompts import PLANNING_PROMPT
+
+        env_xml = self._build_env_context_xml(iteration)
+        planning_prompt = PLANNING_PROMPT.format(env_context=env_xml)
+
+        planning_messages = [
+            {"role": "system", "content": self.system_prompt},
+        ]
+        # Include conversation history so the LLM knows current state
+        planning_messages.extend(messages[1:])
+        planning_messages.append({"role": "user", "content": planning_prompt})
+
+        try:
+            request = LLMRequest(
+                messages=planning_messages,
+                model="default",
+                max_tokens=200,
+            )
+            response = self.call_llm(request)
+            content = response.content or ""
+
+            # Parse JSON from response (handle reasoning models that wrap in text)
+            try:
+                # Try direct parse
+                decision = _json.loads(content.strip())
+            except _json.JSONDecodeError:
+                # Try to extract JSON from text
+                import re
+                match = re.search(r'\{[^}]+\}', content)
+                if match:
+                    decision = _json.loads(match.group())
+                else:
+                    decision = {"delegate": False}
+
+            delegate = decision.get("delegate", False)
+            if delegate:
+                task = decision.get("task", "")
+                logger.info("  [iter %d] Planning: delegate — %s", iteration + 1, task[:100])
+            else:
+                logger.info("  [iter %d] Planning: act directly", iteration + 1)
+            return delegate, decision.get("task", "")
+        except Exception as e:
+            logger.info("  [iter %d] Planning failed (%s), acting directly", iteration + 1, e)
+            return False, ""
+
+    def _build_tools_filtered(self, delegate: bool) -> list[dict] | None:
+        """Build tools list based on planning decision."""
+        if delegate:
+            # Only expose use_agent
+            delegate_actions = [a for a in self.actions if a.name == "use_agent"]
+            if not delegate_actions:
+                return self._build_tools()  # fallback: no use_agent available
+            return self._build_tools_from_actions(delegate_actions)
+        else:
+            # Expose everything except use_agent
+            normal_actions = [a for a in self.actions if a.name != "use_agent"]
+            return self._build_tools_from_actions(normal_actions)
+
+    def _build_tools_from_actions(self, actions: list) -> list[dict] | None:
+        """Convert a list of Action objects to OpenAI tools format."""
+        if not actions:
+            return None
+        import json as _json
+        tools = []
+        for action in actions:
+            properties = {}
+            required = []
+            for param_name, param_def in action.parameters.items():
+                prop = {"type": param_def.get("type", "string")}
+                if "description" in param_def:
+                    prop["description"] = param_def["description"]
+                if "default" in param_def:
+                    prop["default"] = param_def["default"]
+                if "enum" in param_def:
+                    prop["enum"] = param_def["enum"]
+                if "items" in param_def:
+                    prop["items"] = param_def["items"]
+                properties[param_name] = prop
+                if param_def.get("required", False):
+                    required.append(param_name)
+            tools.append({
+                "type": "function",
+                "function": {
+                    "name": action.name,
+                    "description": action.description,
+                    "parameters": {
+                        "type": "object",
+                        "properties": properties,
+                        "required": required,
+                    },
+                },
+            })
+        return tools
 
     def run(self, context: str | None = None) -> AgentResult:
         from midas_agent.scheduler.resource_meter import BudgetExhaustedError
 
         iterations = 0
         action_history: list[ActionRecord] = []
-        messages: list[dict] = [{"role": "system", "content": self._build_system_prompt(0)}]
+        messages: list[dict] = [{"role": "system", "content": self.system_prompt}]
 
-        # User message is just the task (env context is now in system prompt)
         if context is not None:
             messages.append({"role": "user", "content": context})
 
-        # ReAct loop (tools available from the start)
         plan_received = False
         while True:
             if self.max_iterations is not None and iterations >= self.max_iterations:
@@ -77,11 +172,26 @@ class PlanExecuteAgent(ReactAgent):
                     action_history=action_history,
                 )
 
-            # Update system prompt with current balance and iteration
-            messages[0]["content"] = self._build_system_prompt(iterations)
+            # Planning step: decide delegate or act directly
+            has_use_agent = any(a.name == "use_agent" for a in self.actions)
+            if has_use_agent:
+                delegate, delegate_task = self._planning_step(messages, iterations)
+            else:
+                delegate = False
+                delegate_task = ""
+
+            # If delegating, inject the task into messages so the LLM uses it
+            if delegate and delegate_task:
+                messages.append({
+                    "role": "user",
+                    "content": f"Delegate this task to a sub-agent: {delegate_task}",
+                })
+
+            # Build filtered tools based on planning decision
+            tools = self._build_tools_filtered(delegate) if has_use_agent else self._build_tools()
 
             try:
-                request = LLMRequest(messages=messages, model="default", tools=self._build_tools())
+                request = LLMRequest(messages=messages, model="default", tools=tools)
                 response = self.call_llm(request)
             except BudgetExhaustedError:
                 logger.info("  Budget exhausted at iter %d", iterations + 1)
