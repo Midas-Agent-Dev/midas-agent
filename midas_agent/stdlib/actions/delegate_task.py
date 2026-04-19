@@ -8,19 +8,7 @@ from midas_agent.stdlib.action import Action
 if TYPE_CHECKING:
     from midas_agent.scheduler.hiring_manager import HiringManager
 
-SUB_AGENT_INSTRUCTIONS = """You are a spawned sub-agent working on a specific subtask assigned by your parent agent.
-
-Your responsibilities:
-- Focus ONLY on your assigned subtask. Do not try to solve the entire problem.
-- When you have completed your analysis or work, call report_result with a clear, concise summary of your findings.
-- Your report_result content will be delivered directly to your parent agent.
-
-Guidelines:
-- Be thorough but focused. Read relevant code, search for patterns, and form a clear conclusion.
-- If you are an explorer, you can search and read code but cannot edit files.
-- If you are a worker, you can also edit and write files.
-- Always call report_result when done. Do not just stop — explicitly report your findings.
-"""
+from midas_agent.prompts import SUB_AGENT_INSTRUCTIONS
 
 
 class DelegateTaskAction(Action):

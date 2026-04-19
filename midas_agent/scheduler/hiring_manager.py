@@ -109,21 +109,8 @@ class HiringManager:
 
     def _ask_system_llm(self, task: str, roster: str) -> dict:
         """Make ONE SystemLLM call and parse the JSON response."""
-        prompt = (
-            f"Task: {task}\n\n"
-            f"Agents:\n{roster}\n\n"
-            "Pick one:\n"
-            'A) Hire agent if its skill matches the task. Reply: {"action":"hire","agent_id":"<id>","reason":"..."}\n'
-            'B) Spawn new explorer (read-only: search, run scripts, investigate). Reply: {"action":"spawn","role":"explorer","reason":"..."}\n'
-            'C) Spawn new worker (can edit files). Reply: {"action":"spawn","role":"worker","reason":"..."}\n\n'
-            "Examples:\n"
-            '- Task: "Find where function X is defined" + Agent: code_explorer → {"action":"hire","agent_id":"spawned-aaa","reason":"searching code matches code_explorer"}\n'
-            '- Task: "Run test_foo.py" + Agent: test_runner → {"action":"hire","agent_id":"spawned-bbb","reason":"running tests matches test_runner"}\n'
-            '- Task: "Run test_foo.py" + Agent: code_explorer → {"action":"spawn","role":"explorer","reason":"running tests does not match code_explorer"}\n'
-            '- Task: "Fix bug on line 50" + Agent: targeted_code_fix → {"action":"hire","agent_id":"spawned-ccc","reason":"fixing code matches targeted_code_fix"}\n'
-            '- Task: "Fix bug on line 50" + Agent: code_explorer → {"action":"spawn","role":"worker","reason":"fixing code needs file editing, code_explorer is read-only"}\n\n'
-            "JSON only:"
-        )
+        from midas_agent.prompts import HIRING_PROMPT_TEMPLATE
+        prompt = HIRING_PROMPT_TEMPLATE.format(task=task, roster=roster)
 
         request = LLMRequest(
             messages=[{"role": "user", "content": prompt}],
@@ -205,33 +192,8 @@ class HiringManager:
         """Use SystemLLM to generate the agent's identity and initial skill."""
         from midas_agent.workspace.graph_emergence.skill import Skill
 
-        prompt = (
-            "You are creating a specialist agent. Given the task and role, "
-            "generate the agent's identity.\n\n"
-            f"## Role: {role}\n"
-            f"## Task: {task}\n\n"
-            "Reply as JSON:\n"
-            '{"name": "<short_skill_name>", '
-            '"description": "<one line — what this agent is good at, for matching future tasks>", '
-            '"system_prompt": "<2-3 sentences — who the agent is and how it works>"}\n\n'
-            "## Examples\n\n"
-            "### Example 1\n"
-            "Role: explorer\n"
-            "Task: Search for all callers of the _cstack function in the modeling module\n\n"
-            '{"name": "code_search", '
-            '"description": "Search codebases for function definitions, callers, and usage patterns", '
-            '"system_prompt": "You are a code search specialist. You find function definitions, '
-            "trace call chains, and report file paths with line numbers. Use grep -rn for text "
-            'search and find for file discovery. Always report results as a structured list."}\n\n'
-            "### Example 2\n"
-            "Role: worker\n"
-            "Task: Fix the error message format in _check_required_columns to show which columns are missing\n\n"
-            '{"name": "targeted_code_fix", '
-            '"description": "Make precise, minimal edits to fix specific bugs in source code", '
-            '"system_prompt": "You are a code fix specialist. You make minimal, targeted edits to '
-            "fix bugs. Read the relevant code, understand the exact issue, make the smallest change "
-            'that fixes it, and verify with a test. Never change more than necessary."}'
-        )
+        from midas_agent.prompts import AGENT_INIT_PROMPT_TEMPLATE
+        prompt = AGENT_INIT_PROMPT_TEMPLATE.format(role=role, task=task)
 
         request = LLMRequest(
             messages=[{"role": "user", "content": prompt}],
