@@ -50,7 +50,6 @@ search, investigation, and test execution. Sub-agents cannot see your \
 conversation — include file paths, function names, and what you need back.
 - **bash**: Run commands, search code with `grep -rn` / `find`, run tests.
 - **str_replace_editor**: View, create, or edit files.
-- **update_plan**: Track multi-step progress.
 - **task_done**: Submit your fix (remove debug scripts first).
 
 ## When to delegate (use_agent)

@@ -12,7 +12,6 @@ from midas_agent.scheduler.hiring_manager import HiringManager
 from midas_agent.stdlib.actions.delegate_task import DelegateTaskAction
 from midas_agent.stdlib.actions.str_replace_editor import StrReplaceEditorAction
 from midas_agent.stdlib.actions.task_done import TaskDoneAction
-from midas_agent.stdlib.actions.update_plan import UpdatePlanAction
 from midas_agent.stdlib.plan_execute_agent import PlanExecuteAgent
 from midas_agent.types import Issue
 from midas_agent.workspace.base import Workspace
@@ -109,7 +108,7 @@ class GraphEmergenceWorkspace(Workspace):
 
         delegate = DelegateTaskAction(hiring_manager=hiring_manager)
 
-        actions = list(self._extra_actions) + base_actions + [UpdatePlanAction(), TaskDoneAction(), delegate]
+        actions = list(self._extra_actions) + base_actions + [TaskDoneAction(), delegate]
 
         agent = PlanExecuteAgent(
             system_prompt=self._responsible_agent.soul.system_prompt,

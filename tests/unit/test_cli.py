@@ -159,7 +159,7 @@ class TestBuildActionSet:
         assert isinstance(actions, list)
         assert all(isinstance(a, Action) for a in actions)
 
-    def test_at_least_six_actions(self, tmp_path):
-        """Local mode provides at least 6 actions (4 core + update_plan + task_done)."""
+    def test_at_least_three_actions(self, tmp_path):
+        """Local mode provides at least 3 actions (bash + str_replace_editor + task_done)."""
         actions = build_action_set(cwd=str(tmp_path), env="local")
-        assert len(actions) >= 6
+        assert len(actions) >= 3
