@@ -44,13 +44,15 @@ When to delegate:
 When NOT to delegate: the next step depends on what you just learned, \
 your context is still short, or you are very low on budget.
 
-Example — at iteration 12 your context is long, you need to search:
+Example — you need to search while continuing to work on your fix:
   You call: use_agent(task="Find all files in /testbed/astropy/timeseries/ \
 that call _check_required_columns. List each file path and line number.")
   Result: "Found 3 callers:
   - /testbed/astropy/timeseries/core.py:32
   - /testbed/astropy/timeseries/core.py:102
   - /testbed/astropy/timeseries/sampled.py:17"
+The sub-agent handled the search in a separate context with its own \
+budget, keeping your main context clean for the fix.
 
 ## How to approach problems
 
