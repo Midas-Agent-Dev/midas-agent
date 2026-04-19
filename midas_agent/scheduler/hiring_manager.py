@@ -117,9 +117,11 @@ class HiringManager:
             'B) Spawn new explorer (read-only: search, run scripts, investigate). Reply: {"action":"spawn","role":"explorer"}\n'
             'C) Spawn new worker (can edit files). Reply: {"action":"spawn","role":"worker"}\n\n'
             "Examples:\n"
-            '- Task: "Find where function X is defined" + Agent: code_explorer → hire (skill matches)\n'
-            '- Task: "Run test_foo.py" + Agent: code_explorer → spawn explorer (running tests is not code exploration)\n'
-            '- Task: "Edit line 50 of foo.py" + Agent: code_explorer → spawn worker (editing needs worker, not explorer)\n\n'
+            '- Task: "Find where function X is defined" + Agent: code_explorer → hire (searching code matches code_explorer)\n'
+            '- Task: "Run test_foo.py" + Agent: test_runner → hire (running tests matches test_runner)\n'
+            '- Task: "Run test_foo.py" + Agent: code_explorer → spawn explorer (running tests does not match code_explorer)\n'
+            '- Task: "Fix bug on line 50" + Agent: targeted_code_fix → hire (fixing code matches targeted_code_fix)\n'
+            '- Task: "Fix bug on line 50" + Agent: code_explorer → spawn worker (fixing code needs a worker, not explorer)\n\n'
             "JSON only:"
         )
 
