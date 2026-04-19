@@ -17,9 +17,19 @@ class ReportResultAction(Action):
     @property
     def description(self) -> str:
         return (
-            "Signals that your task is complete and submits your findings. "
-            "Provide a clear summary of what you found or did, including "
-            "file paths and line numbers. After calling this, your session ends."
+            "Signals that your task is complete and submits your findings.\n\n"
+            "Usage:\n"
+            " - Call this exactly once when your assigned task is complete.\n"
+            " - Write a clear, actionable summary: what you found, what "
+            "files are relevant, what the root cause is, and what fix you "
+            "recommend.\n"
+            " - Include specific file paths and line numbers when "
+            "referencing code.\n"
+            " - After calling this, your session ends. No further actions "
+            "will be executed.\n\n"
+            "IMPORTANT: Do not just say 'done' or 'task complete'. Provide "
+            "enough detail so that your findings can be acted on without "
+            "having to redo your work."
         )
 
     @property
