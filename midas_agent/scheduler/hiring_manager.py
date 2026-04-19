@@ -119,10 +119,18 @@ class HiringManager:
             "later evicted for poor performance. 0.00 means never associated with failure.\n\n"
             "## Instructions\n"
             "Pick the best option:\n"
-            '1. Hire an existing agent: respond with `{"action": "hire", "agent_id": "<id>"}`\n'
-            '2. Spawn a new agent: respond with `{"action": "spawn", "role": "explorer"}` '
-            'or `{"action": "spawn", "role": "worker"}`\n\n'
-            "Respond with ONLY the JSON object, no other text."
+            '1. Hire an existing agent — ONLY if its skill is relevant to the task. '
+            'Do not hire an agent just because it exists.\n'
+            '2. Spawn a new specialist — when no existing agent\'s skill matches the task, '
+            'or when the task requires a different expertise.\n\n'
+            "Choose explorer for read-only tasks (search, investigate, run scripts). "
+            "Choose worker for tasks that require editing files.\n\n"
+            'Reply as JSON only:\n'
+            '{"action": "hire", "agent_id": "<id>"}\n'
+            'or\n'
+            '{"action": "spawn", "role": "explorer"}\n'
+            'or\n'
+            '{"action": "spawn", "role": "worker"}'
         )
 
         request = LLMRequest(
