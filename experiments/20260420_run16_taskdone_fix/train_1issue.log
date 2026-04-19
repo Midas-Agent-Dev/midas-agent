@@ -552,3 +552,8 @@ spawned-a2d82aaf: separability_analyzer — Analyze separable function implement
 2026-04-20 01:50:31,141 - midas_agent.stdlib.plan_execute_agent - INFO -     → Agent completed with no output.
 2026-04-20 01:50:31,141 - midas_agent.stdlib.plan_execute_agent - INFO -   [iter 11] Planning failed (Budget exhausted for ws-0), acting directly
 2026-04-20 01:50:31,142 - midas_agent.stdlib.plan_execute_agent - INFO -   Budget exhausted at iter 11
+2026-04-20 01:52:44,599 - midas_agent.training - INFO -   Scores: {'ws-0': '0.195'}
+2026-04-20 01:52:44,898 - midas_agent.docker.container_manager - INFO - Removed container d77e25dcfc84
+2026-04-20 01:52:45,237 - midas_agent.training - INFO - Exported Graph Emergence artifact to /tmp/midas_output/graph_emergence_artifact.json
+2026-04-20 01:52:45,237 - midas_agent.training - INFO - Training complete. 1 episodes.
+Training: 1 issues, budget=2000000

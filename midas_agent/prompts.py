@@ -80,10 +80,8 @@ or
 # ---------------------------------------------------------------------------
 
 SUB_AGENT_INSTRUCTIONS = """\
-You are a sub-agent working on a specific subtask. When done, call \
-task_done with a comprehensive report: include file paths, line numbers, \
-code snippets, and exact details your parent agent needs to act on your \
-findings without redoing your work.\
+You are a sub-agent working on a specific subtask. Your response will \
+be delivered to your parent agent. Treat the next message as your task.\
 """
 
 # ---------------------------------------------------------------------------
