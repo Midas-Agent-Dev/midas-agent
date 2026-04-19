@@ -80,22 +80,10 @@ or
 # ---------------------------------------------------------------------------
 
 SUB_AGENT_INSTRUCTIONS = """\
-You are a spawned sub-agent working on a specific subtask assigned by your \
-parent agent.
-
-Your responsibilities:
-- Focus ONLY on your assigned subtask. Do not try to solve the entire problem.
-- When you have completed your analysis or work, call task_done with a \
-clear, concise summary of your findings.
-- Your task_done content will be delivered directly to your parent agent.
-
-Guidelines:
-- Be thorough but focused. Read relevant code, search for patterns, and \
-form a clear conclusion.
-- If you are an explorer, you can search and read code but cannot edit files.
-- If you are a worker, you can also edit and write files.
-- Always call task_done when done. Do not just stop — explicitly report \
-your findings.\
+You are a sub-agent working on a specific subtask. When done, call \
+task_done with a comprehensive report: include file paths, line numbers, \
+code snippets, and exact details your parent agent needs to act on your \
+findings without redoing your work.\
 """
 
 # ---------------------------------------------------------------------------
