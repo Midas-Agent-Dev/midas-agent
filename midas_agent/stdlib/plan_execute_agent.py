@@ -180,15 +180,39 @@ class PlanExecuteAgent(ReactAgent):
                 delegate = False
                 delegate_task = ""
 
-            # If delegating, inject the task into messages so the LLM uses it
+            # If delegating, call HiringManager directly (no LLM call needed)
             if delegate and delegate_task:
-                messages.append({
-                    "role": "user",
-                    "content": f"Delegate this task to a sub-agent: {delegate_task}",
-                })
+                iterations += 1
+                use_agent_action = self._actions_by_name.get("use_agent")
+                if use_agent_action:
+                    logger.info(
+                        "  [iter %d] use_agent(task=%.80s) (delegated by planner)",
+                        iterations, delegate_task,
+                    )
+                    result = use_agent_action.execute(task=delegate_task)
+                    logger.info("    → %s", result[:300] if result else "(empty)")
 
-            # Build filtered tools based on planning decision
-            tools = self._build_tools_filtered(delegate) if has_use_agent else self._build_tools()
+                    record = ActionRecord(
+                        action_name="use_agent",
+                        arguments={"task": delegate_task},
+                        result=result,
+                        timestamp=time.time(),
+                    )
+                    action_history.append(record)
+
+                    # Inject as assistant + tool messages so LLM sees the result
+                    messages.append({
+                        "role": "assistant",
+                        "content": f"I delegated to a sub-agent: {delegate_task}",
+                    })
+                    messages.append({
+                        "role": "user",
+                        "content": f"Sub-agent result:\n{result}",
+                    })
+                    continue
+
+            # Normal action: expose all tools except use_agent
+            tools = self._build_tools_filtered(False) if has_use_agent else self._build_tools()
 
             try:
                 request = LLMRequest(messages=messages, model="default", tools=tools)
