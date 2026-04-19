@@ -17,8 +17,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Tool sets per role
-_EXPLORER_TOOLS = {"bash", "str_replace_editor", "report_result"}
-_WORKER_TOOLS = {"bash", "str_replace_editor", "report_result"}
+_EXPLORER_TOOLS = {"bash", "str_replace_editor", "task_done"}
+_WORKER_TOOLS = {"bash", "str_replace_editor", "task_done"}
 
 
 class HiringManager:
@@ -275,14 +275,14 @@ class HiringManager:
         """Build action set for a sub-agent based on protection status and role.
 
         When *role* is provided (from spawn path role parsing):
-        - explorer: bash, str_replace_editor, report_result
-        - worker: bash, str_replace_editor, report_result
+        - explorer: bash, str_replace_editor, task_done
+        - worker: bash, str_replace_editor, task_done
 
         When *role* is None (backward compat / hire path):
         - No role-based filtering; only protection-based filtering applies.
 
         Protected agents: no use_agent, no task_done.
-        Independent agents: basic actions + use_agent + report_result.
+        Independent agents: basic actions + use_agent + task_done.
         """
         from midas_agent.stdlib.actions.delegate_task import DelegateTaskAction
 
@@ -320,8 +320,8 @@ class HiringManager:
                     hiring_manager=self,
                 ))
 
-        # Add report_result for sub-agents
-        has_report = any(a.name == "report_result" for a in result)
+        # Add task_done for sub-agents
+        has_report = any(a.name == "task_done" for a in result)
         if not has_report:
             cb = report_callback if report_callback is not None else (lambda r: None)
             result.append(ReportResultAction(report=cb))
