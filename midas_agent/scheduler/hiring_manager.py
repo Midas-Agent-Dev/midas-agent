@@ -59,7 +59,11 @@ class HiringManager:
         from midas_agent.stdlib.react_agent import ReactAgent
 
         roster = self._build_roster()
+        logger.info("  HiringManager: roster has %d agents", len(self._free_agent_manager.free_agents))
+        logger.info("  HiringManager: roster:\n%s", roster)
+
         decision = self._ask_system_llm(task, roster)
+        logger.info("  HiringManager: decision=%s for task=%.100s", decision, task)
 
         if decision["action"] == "hire":
             return self._run_hired_agent(decision["agent_id"], task)
@@ -141,8 +145,8 @@ class HiringManager:
                 if role not in ("explorer", "worker"):
                     role = "explorer"
                 return {"action": "spawn", "role": role}
-        except (json.JSONDecodeError, AttributeError, KeyError, TypeError):
-            logger.warning("HiringManager: malformed SystemLLM response, falling back to spawn")
+        except (json.JSONDecodeError, AttributeError, KeyError, TypeError) as e:
+            logger.warning("  HiringManager: malformed SystemLLM response (%s): %.200s", e, content)
 
         # Fallback
         return {"action": "spawn", "role": "explorer"}
@@ -158,7 +162,11 @@ class HiringManager:
         agents = self._free_agent_manager.free_agents
         agent = agents.get(agent_id)
         if agent is None:
-            return f"Agent not found: {agent_id}"
+            logger.warning("  HiringManager: agent %s not found, falling back to spawn", agent_id)
+            return self._run_spawned_agent(task, "explorer")
+
+        skill_name = agent.skill.name if agent.skill else "none"
+        logger.info("  HiringManager: hiring %s (skill=%s, protected_by=%s)", agent_id, skill_name, agent.protected_by)
 
         # Build system prompt with skill content
         system_prompt = agent.soul.system_prompt
@@ -189,6 +197,7 @@ class HiringManager:
 
         agent = self._spawn_callback(task)
         aid = getattr(agent, "agent_id", None) or "new agent"
+        logger.info("  HiringManager: spawned %s (protected_by=%s)", aid, agent.protected_by)
 
         reported: dict = {}
         def on_report(text, _reported=reported):
