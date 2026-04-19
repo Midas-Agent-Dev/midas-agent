@@ -1,0 +1,280 @@
+Warning: 'midas' is an entry point defined in pyproject.toml, but it's not installed as a script. You may get improper `sys.argv[0]`.
+
+The support to run uninstalled scripts will be removed in a future release.
+
+Run `poetry install` to resolve and get rid of this message.
+
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+2026-04-19 15:27:55,342 - midas_agent.training - INFO - Episode 1/10: astropy__astropy-12907 (astropy/astropy)
+2026-04-19 15:28:00,083 - midas_agent.training - INFO -   Cloned astropy/astropy @ d16bfe05
+2026-04-19 15:28:02,034 - midas_agent.docker.container_manager - INFO - Started container 42cfcf11a1c6 from swebench/sweb.eval.x86_64.astropy_1776_astropy-12907:latest
+2026-04-19 15:28:02,034 - midas_agent.training - INFO -   ws-0: Docker container 42cfcf11a1c6
+2026-04-19 15:28:04,601 - midas_agent.stdlib.plan_execute_agent - INFO -   [iter 1] bash(command='find /testbed -type f -name "*.py" | xargs grep -l "separability_matrix" | head) (2706 tokens)
+2026-04-19 15:28:05,108 - midas_agent.stdlib.plan_execute_agent - INFO -     → /testbed/astropy/modeling/separable.py
+/testbed/astropy/modeling/core.py
+/testbed/astropy/modeling/tests/test_models.py
+/testbed/astropy/modeling/tests/test_separable.py
+/testbed/astropy/modeling/tests/test_core.py
+
+2026-04-19 15:28:06,357 - midas_agent.stdlib.plan_execute_agent - INFO -   [iter 2] str_replace_editor(command='view', path='/testbed/astropy/modeling/separable.py') (2786 tokens)
+2026-04-19 15:28:06,457 - midas_agent.stdlib.plan_execute_agent - INFO -     → Here's the result of running `cat -n` on /testbed/astropy/modeling/separable.py:
+     1	# Licensed under a 3-clause BSD style license - see LICENSE.rst
+     2	
+     3	"""
+     4	Functions to determine if a model is separable, i.e.
+     5	if the model outputs are independent.
+     6	
+     7	It analyz
+2026-04-19 15:28:17,993 - midas_agent.stdlib.plan_execute_agent - INFO -   [iter 3] str_replace_editor(command='create', path='/testbed/reproduce_issue.py', file_text='#!/usr/bin/env python\n"""Script to reproduce the separability_matrix issue wit) (7126 tokens)
+2026-04-19 15:28:18,148 - midas_agent.stdlib.plan_execute_agent - INFO -     → File created successfully at: /testbed/reproduce_issue.py
+2026-04-19 15:28:21,480 - midas_agent.stdlib.plan_execute_agent - INFO -   [iter 4] bash(command='python reproduce_issue.py') (6866 tokens)
+2026-04-19 15:28:22,917 - midas_agent.stdlib.plan_execute_agent - INFO -     → Test 1: Simple compound model (Linear1D & Linear1D)
+[[ True False]
+ [False  True]]
+Expected:
+[[ True False]
+ [False  True]]
+Match: True
+
+Test 2: Pix2Sky_TAN() & Linear1D(10) & Linear1D(5)
+[[ True  True False False]
+ [ True  True False False]
+ [False False  True False]
+ [False False False  True]]
+Exp
+2026-04-19 15:28:40,237 - midas_agent.stdlib.plan_execute_agent - INFO -   [iter 5] str_replace_editor(command='str_replace', path='/testbed/astropy/modeling/separable.py', old_str="if isinstance(right, Model):\n        cright = _coord_matrix(right, 'right', no, new_str="if isinstance(right, Model):\n        cright = _coord_matrix(right, 'right', no) (7879 tokens)
+2026-04-19 15:28:40,398 - midas_agent.stdlib.plan_execute_agent - INFO -     → The file /testbed/astropy/modeling/separable.py has been edited. Here's the result of running `cat -n` on a snippet of /testbed/astropy/modeling/separable.py:
+   237	        cleft = _coord_matrix(left, 'left', noutp)
+   238	    else:
+   239	        cleft = np.zeros((noutp, left.shape[1]))
+   240	   
+2026-04-19 15:28:43,126 - midas_agent.stdlib.plan_execute_agent - INFO -   [iter 6] bash(command='python reproduce_issue.py') (7740 tokens)
+2026-04-19 15:28:44,121 - midas_agent.stdlib.plan_execute_agent - INFO -     → Test 1: Simple compound model (Linear1D & Linear1D)
+[[ True False]
+ [False  True]]
+Expected:
+[[ True False]
+ [False  True]]
+Match: True
+
+Test 2: Pix2Sky_TAN() & Linear1D(10) & Linear1D(5)
+[[ True  True False False]
+ [ True  True False False]
+ [False False  True False]
+ [False False False  True]]
+Exp
+2026-04-19 15:29:17,126 - midas_agent.stdlib.plan_execute_agent - INFO -   [iter 7] str_replace_editor(command='create', path='/testbed/test_edge_cases.py', file_text='#!/usr/bin/env python\n"""Test edge cases for the separability_matrix fix."""\n) (9332 tokens)
+2026-04-19 15:29:17,282 - midas_agent.stdlib.plan_execute_agent - INFO -     → File created successfully at: /testbed/test_edge_cases.py
+2026-04-19 15:29:19,926 - midas_agent.stdlib.plan_execute_agent - INFO -   [iter 8] bash(command='python test_edge_cases.py') (8977 tokens)
+2026-04-19 15:29:20,908 - midas_agent.stdlib.plan_execute_agent - INFO -     → ============================================================
+Edge Case 1: Nested on left side (Linear1D & Linear1D) & Pix2Sky_TAN
+[[ True False False False]
+ [False  True False False]
+ [False False  True  True]
+ [False False  True  True]]
+Expected:
+[[ True False False False]
+ [False  True False Fals
+2026-04-19 15:29:35,769 - midas_agent.stdlib.plan_execute_agent - INFO -   [iter 9] bash(command='python -c "\nfrom astropy.modeling import models as m\nfrom astropy.modeling.se) (10024 tokens)
+2026-04-19 15:29:36,686 - midas_agent.stdlib.plan_execute_agent - INFO -     → cm_left (Linear1D | Linear1D):
+  n_inputs=1, n_outputs=1
+  separability: [[ True]]
+cm_total:
+  n_inputs=2, n_outputs=2
+  separability: [[ True False]
+ [False  True]]
+
+2026-04-19 15:29:43,007 - midas_agent.stdlib.plan_execute_agent - INFO -   [iter 10] bash(command='python -c "\nfrom astropy.modeling import models as m\nfrom astropy.modeling.se) (10050 tokens)
+2026-04-19 15:29:43,951 - midas_agent.stdlib.plan_execute_agent - INFO -     → Shift(1) | Shift(2):
+[[ True]]
+(Shift | Shift) & Shift(1):
+[[ True False]
+ [False  True]]
+(Shift(1) + Shift(2)) & Shift(1):
+[[ True False]
+ [False  True]]
+
+2026-04-19 15:29:48,877 - midas_agent.stdlib.plan_execute_agent - INFO -   [iter 11] bash(command='python -m pytest /testbed/astropy/modeling/tests/test_separable.py -v 2>&1 | ta) (10235 tokens)
+2026-04-19 15:29:51,230 - midas_agent.stdlib.plan_execute_agent - INFO -     → 
+Date: 2026-04-19T13:29:50
+
+Platform: Linux-6.12.76-linuxkit-x86_64-with-glibc2.35
+
+Executable: /opt/miniconda3/envs/testbed/bin/python
+
+Full Python Version: 
+3.9.20 (main, Oct  3 2024, 07:27:41) 
+[GCC 11.2.0]
+
+encodings: sys: utf-8, locale: UTF-8, filesystem: utf-8
+byteorder: little
+float info: dig
+2026-04-19 15:29:53,919 - midas_agent.stdlib.plan_execute_agent - INFO -   [iter 12] bash(command='python -m pytest /testbed/astropy/modeling/tests/test_models.py -v -k "separab") (10855 tokens)
+2026-04-19 15:29:55,390 - midas_agent.stdlib.plan_execute_agent - INFO -     → 
+encodings: sys: utf-8, locale: UTF-8, filesystem: utf-8
+byteorder: little
+float info: dig: 15, mant_dig: 15
+
+Package versions: 
+Numpy: 1.25.2
+Scipy: not available
+Matplotlib: not available
+h5py: not available
+Pandas: not available
+PyERFA: 2.0.0.3
+Cython: not available
+Scikit-image: not available
+as
+2026-04-19 15:47:17,651 - midas_agent.docker.container_manager - INFO - Removed container 42cfcf11a1c6
+Traceback (most recent call last):
+  File "/Users/ziyang/Documents/midas-agent/.venv/lib/python3.13/site-packages/httpx/_transports/default.py", line 101, in map_httpcore_exceptions
+    yield
+  File "/Users/ziyang/Documents/midas-agent/.venv/lib/python3.13/site-packages/httpx/_transports/default.py", line 127, in __iter__
+    for part in self._httpcore_stream:
+                ^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/ziyang/Documents/midas-agent/.venv/lib/python3.13/site-packages/httpcore/_sync/connection_pool.py", line 407, in __iter__
+    raise exc from None
+  File "/Users/ziyang/Documents/midas-agent/.venv/lib/python3.13/site-packages/httpcore/_sync/connection_pool.py", line 403, in __iter__
+    for part in self._stream:
+                ^^^^^^^^^^^^
+  File "/Users/ziyang/Documents/midas-agent/.venv/lib/python3.13/site-packages/httpcore/_sync/http11.py", line 342, in __iter__
+    raise exc
+  File "/Users/ziyang/Documents/midas-agent/.venv/lib/python3.13/site-packages/httpcore/_sync/http11.py", line 334, in __iter__
+    for chunk in self._connection._receive_response_body(**kwargs):
+                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^
+  File "/Users/ziyang/Documents/midas-agent/.venv/lib/python3.13/site-packages/httpcore/_sync/http11.py", line 203, in _receive_response_body
+    event = self._receive_event(timeout=timeout)
+  File "/Users/ziyang/Documents/midas-agent/.venv/lib/python3.13/site-packages/httpcore/_sync/http11.py", line 217, in _receive_event
+    data = self._network_stream.read(
+        self.READ_NUM_BYTES, timeout=timeout
+    )
+  File "/Users/ziyang/Documents/midas-agent/.venv/lib/python3.13/site-packages/httpcore/_backends/sync.py", line 126, in read
+    with map_exceptions(exc_map):
+         ~~~~~~~~~~~~~~^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/contextlib.py", line 162, in __exit__
+    self.gen.throw(value)
+    ~~~~~~~~~~~~~~^^^^^^^
+  File "/Users/ziyang/Documents/midas-agent/.venv/lib/python3.13/site-packages/httpcore/_exceptions.py", line 14, in map_exceptions
+    raise to_exc(exc) from exc
+httpcore.ReadTimeout: The read operation timed out
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/Users/ziyang/Documents/midas-agent/.venv/lib/python3.13/site-packages/litellm/llms/custom_httpx/http_handler.py", line 1028, in post
+    response = self.client.send(req, stream=stream)
+  File "/Users/ziyang/Documents/midas-agent/.venv/lib/python3.13/site-packages/httpx/_client.py", line 928, in send
+    raise exc
+  File "/Users/ziyang/Documents/midas-agent/.venv/lib/python3.13/site-packages/httpx/_client.py", line 922, in send
+    response.read()
+    ~~~~~~~~~~~~~^^
+  File "/Users/ziyang/Documents/midas-agent/.venv/lib/python3.13/site-packages/httpx/_models.py", line 881, in read
+    self._content = b"".join(self.iter_bytes())
+                    ~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "/Users/ziyang/Documents/midas-agent/.venv/lib/python3.13/site-packages/httpx/_models.py", line 897, in iter_bytes
+    for raw_bytes in self.iter_raw():
+                     ~~~~~~~~~~~~~^^
+  File "/Users/ziyang/Documents/midas-agent/.venv/lib/python3.13/site-packages/httpx/_models.py", line 951, in iter_raw
+    for raw_stream_bytes in self.stream:
+                            ^^^^^^^^^^^
+  File "/Users/ziyang/Documents/midas-agent/.venv/lib/python3.13/site-packages/httpx/_client.py", line 153, in __iter__
+    for chunk in self._stream:
+                 ^^^^^^^^^^^^
+  File "/Users/ziyang/Documents/midas-agent/.venv/lib/python3.13/site-packages/httpx/_transports/default.py", line 126, in __iter__
+    with map_httpcore_exceptions():
+         ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/contextlib.py", line 162, in __exit__
+    self.gen.throw(value)
+    ~~~~~~~~~~~~~~^^^^^^^
+  File "/Users/ziyang/Documents/midas-agent/.venv/lib/python3.13/site-packages/httpx/_transports/default.py", line 118, in map_httpcore_exceptions
+    raise mapped_exc(message) from exc
+httpx.ReadTimeout: The read operation timed out
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/ziyang/Documents/midas-agent/.venv/lib/python3.13/site-packages/litellm/llms/custom_httpx/llm_http_handler.py", line 235, in _make_common_sync_call
+    response = sync_httpx_client.post(
+        url=api_base,
+    ...<8 lines>...
+        logging_obj=logging_obj,
+    )
+  File "/Users/ziyang/Documents/midas-agent/.venv/lib/python3.13/site-packages/litellm/llms/custom_httpx/http_handler.py", line 1032, in post
+    raise litellm.Timeout(
+    ...<3 lines>...
+    )
+litellm.exceptions.Timeout: litellm.Timeout: Connection timed out after 600.0 seconds.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/ziyang/Documents/midas-agent/.venv/lib/python3.13/site-packages/litellm/main.py", line 3316, in completion
+    response = base_llm_http_handler.completion(
+        model=model,
+    ...<14 lines>...
+        client=client,
+    )
+  File "/Users/ziyang/Documents/midas-agent/.venv/lib/python3.13/site-packages/litellm/llms/custom_httpx/llm_http_handler.py", line 559, in completion
+    response = self._make_common_sync_call(
+        sync_httpx_client=sync_httpx_client,
+    ...<7 lines>...
+        logging_obj=logging_obj,
+    )
+  File "/Users/ziyang/Documents/midas-agent/.venv/lib/python3.13/site-packages/litellm/llms/custom_httpx/llm_http_handler.py", line 262, in _make_common_sync_call
+    raise self._handle_error(e=e, provider_config=provider_config)
+          ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/ziyang/Documents/midas-agent/.venv/lib/python3.13/site-packages/litellm/llms/custom_httpx/llm_http_handler.py", line 4720, in _handle_error
+    raise provider_config.get_error_class(
+    ...<3 lines>...
+    )
+litellm.llms.openrouter.common_utils.OpenRouterException: litellm.Timeout: Connection timed out after 600.0 seconds.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import sys; from importlib import import_module; sys.argv = ['midas', 'train', '--config', 'train.yaml', '--issues', '10']; sys.exit(import_module('midas_agent.cli').main())
+                                                                                                                                         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/Users/ziyang/Documents/midas-agent/midas_agent/cli.py", line 172, in main
+    _cmd_train(args)
+    ~~~~~~~~~~^^^^^^
+  File "/Users/ziyang/Documents/midas-agent/midas_agent/cli.py", line 120, in _cmd_train
+    run_training(config, issues=issues)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/ziyang/Documents/midas-agent/midas_agent/training.py", line 300, in run_training
+    ws.execute(issue)
+    ~~~~~~~~~~^^^^^^^
+  File "/Users/ziyang/Documents/midas-agent/midas_agent/workspace/graph_emergence/workspace.py", line 127, in execute
+    self._last_result = agent.run(context=context)
+                        ~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/Users/ziyang/Documents/midas-agent/midas_agent/stdlib/plan_execute_agent.py", line 85, in run
+    response = self.call_llm(request)
+  File "/Users/ziyang/Documents/midas-agent/midas_agent/training.py", line 200, in <lambda>
+    lambda req: resource_meter.process(req, entity_id=ws_id)
+                ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/ziyang/Documents/midas-agent/midas_agent/scheduler/resource_meter.py", line 34, in process
+    response = self._llm_provider.complete(request)
+  File "/Users/ziyang/Documents/midas-agent/midas_agent/llm/litellm_provider.py", line 71, in complete
+    response = litellm.completion(**kwargs)
+  File "/Users/ziyang/Documents/midas-agent/.venv/lib/python3.13/site-packages/litellm/utils.py", line 1771, in wrapper
+    raise e
+  File "/Users/ziyang/Documents/midas-agent/.venv/lib/python3.13/site-packages/litellm/utils.py", line 1592, in wrapper
+    result = original_function(*args, **kwargs)
+  File "/Users/ziyang/Documents/midas-agent/.venv/lib/python3.13/site-packages/litellm/main.py", line 4411, in completion
+    raise exception_type(
+          ~~~~~~~~~~~~~~^
+        model=model,
+        ^^^^^^^^^^^^
+    ...<3 lines>...
+        extra_kwargs=kwargs,
+        ^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/Users/ziyang/Documents/midas-agent/.venv/lib/python3.13/site-packages/litellm/litellm_core_utils/exception_mapping_utils.py", line 2456, in exception_type
+    raise e
+  File "/Users/ziyang/Documents/midas-agent/.venv/lib/python3.13/site-packages/litellm/litellm_core_utils/exception_mapping_utils.py", line 2345, in exception_type
+    raise Timeout(
+    ...<4 lines>...
+    )
+litellm.exceptions.Timeout: litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out after 600.0 seconds.
+Training: 10 issues, budget=2000000
