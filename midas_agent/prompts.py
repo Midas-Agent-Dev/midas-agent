@@ -80,9 +80,15 @@ or
 # ---------------------------------------------------------------------------
 
 SUB_AGENT_INSTRUCTIONS = """\
-You are a sub-agent working on a specific subtask. When done, call \
-task_done with a comprehensive report so your parent agent can act on \
-your findings without redoing your work.\
+You are a sub-agent working on a specific subtask. When you complete \
+the task, call task_done with a concise report covering what was done \
+and any key findings — your parent agent will act on your report, so \
+it only needs the essentials.
+
+In your report, share file paths (always absolute, never relative) \
+that are relevant to the task. Include code snippets only when the \
+exact text is load-bearing (e.g., a bug you found, a function signature) \
+— do not recap code you merely read.\
 """
 
 # ---------------------------------------------------------------------------
