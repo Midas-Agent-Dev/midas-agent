@@ -30,26 +30,18 @@ logger = logging.getLogger(__name__)
 
 
 def _make_llm_provider(model: str, api_key: str, api_base: str) -> LLMProvider:
-    """Create an LLM provider from config. Empty model = stub."""
+    """Create an LLM provider from config.  Raises if model is empty."""
     if not model:
-        return _StubLLMProvider()
+        raise ValueError(
+            "No LLM model configured.  Set MIDAS_MODEL environment variable "
+            "or add 'model' to .midas/config.yaml."
+        )
     from midas_agent.llm.litellm_provider import LiteLLMProvider
     return LiteLLMProvider(
         model=model,
         api_key=api_key or None,
         api_base=api_base or None,
     )
-
-
-class _StubLLMProvider(LLMProvider):
-    """Minimal LLM provider for offline/test usage."""
-
-    def complete(self, request: LLMRequest) -> LLMResponse:
-        return LLMResponse(
-            content="ok",
-            tool_calls=None,
-            usage=TokenUsage(input_tokens=0, output_tokens=0),
-        )
 
 
 def load_swe_bench(split: str = "test") -> list[Issue]:

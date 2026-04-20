@@ -13,8 +13,8 @@ from midas_agent.workspace.base import Workspace
 from midas_agent.workspace.config_evolution.config_creator import ConfigCreator
 from midas_agent.workspace.config_evolution.config_schema import WorkflowConfig
 from midas_agent.workspace.config_evolution.executor import DAGExecutor, ExecutionResult
-from midas_agent.workspace.config_evolution.mutator import ConfigMutator
-from midas_agent.workspace.config_evolution.snapshot_store import ConfigSnapshotStore
+from midas_agent.workspace.config_evolution.mutator import ConfigMutator, _config_to_yaml
+from midas_agent.workspace.config_evolution.snapshot_store import ConfigSnapshot, ConfigSnapshotStore
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +44,7 @@ class ConfigEvolutionWorkspace(Workspace):
         self._snapshot_store = snapshot_store
         self._budget = 0
         self._last_result: ExecutionResult | None = None
+        self._episode_count = 0
 
     # ------------------------------------------------------------------
     # Helpers
@@ -166,4 +167,20 @@ class ConfigEvolutionWorkspace(Workspace):
                 )
                 self._workflow_config = new_config
             # else: keep current config as-is (default config or no trace)
-            return None
+
+        # -- Save snapshot for export --
+        self._episode_count += 1
+        my_s_w = my_results.get("s_w", 0.0)
+        cost = max(1, self.budget_received)
+        eta = my_s_w / cost if cost > 0 else 0.0
+        self._snapshot_store.save(ConfigSnapshot(
+            episode_id=f"ep-{self._episode_count}",
+            workspace_id=self.workspace_id,
+            config_yaml=_config_to_yaml(self._workflow_config),
+            eta=eta,
+            score=my_s_w,
+            cost=cost,
+            summary=f"s_exec={my_score}",
+        ))
+
+        return None

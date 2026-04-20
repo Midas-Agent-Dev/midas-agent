@@ -486,7 +486,7 @@ class TestActionLogInRealPipeline:
 
         # Mock resolve_llm_config to avoid needing env vars
         mock_llm_config = MagicMock()
-        mock_llm_config.model = ""  # Empty model triggers _StubLLMProvider
+        mock_llm_config.model = "fake-model"
         mock_llm_config.api_key = "fake-key"
         mock_llm_config.api_base = ""
 
@@ -501,15 +501,20 @@ class TestActionLogInRealPipeline:
             # We call the real run_training but with our fake issues
             real_run_training(config, issues=issues)
 
-        with mock_patch("midas_agent.resolver.resolve_llm_config", return_value=mock_llm_config):
-            with mock_patch("midas_agent.training.load_swe_bench", return_value=[fake_issue]):
-                with mock_patch("midas_agent.evaluation.swebench_scorer.SWEBenchScorer") as mock_scorer_cls:
-                    mock_scorer = MagicMock()
-                    mock_scorer.score.return_value = 0.5
-                    mock_scorer_cls.return_value = mock_scorer
+        # Build a fake LLM provider using the scripted responses
+        fake_provider = MagicMock()
+        fake_provider.complete = fake_complete
 
-                    # Run the actual _cmd_train
-                    _cmd_train(args)
+        with mock_patch("midas_agent.resolver.resolve_llm_config", return_value=mock_llm_config), \
+             mock_patch("midas_agent.training._make_llm_provider", return_value=fake_provider), \
+             mock_patch("midas_agent.training.load_swe_bench", return_value=[fake_issue]), \
+             mock_patch("midas_agent.evaluation.swebench_scorer.SWEBenchScorer") as mock_scorer_cls:
+            mock_scorer = MagicMock()
+            mock_scorer.score.return_value = 0.5
+            mock_scorer_cls.return_value = mock_scorer
+
+            # Run the actual _cmd_train
+            _cmd_train(args)
 
         # After training completes, check if action log files were created.
         # The training pipeline should have created JSONL files somewhere
