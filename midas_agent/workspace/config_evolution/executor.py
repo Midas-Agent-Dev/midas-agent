@@ -79,11 +79,11 @@ class DAGExecutor:
                 actions = []
 
             # Create a ReactAgent and run it.
+            # No max_iterations — the token budget controls termination.
             agent = ReactAgent(
                 system_prompt=step.prompt,
                 actions=actions,
                 call_llm=call_llm,
-                max_iterations=10,
             )
 
             try:
