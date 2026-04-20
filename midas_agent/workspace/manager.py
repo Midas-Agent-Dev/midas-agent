@@ -143,7 +143,10 @@ class WorkspaceManager:
         ]
         all_tool_names = [a.name for a in all_actions]
         registry = ActionRegistry(all_actions)
-        dag_executor = DAGExecutor(action_registry=registry)
+        dag_executor = DAGExecutor(
+            action_registry=registry,
+            max_tool_output_chars=self._config.max_tool_output_chars,
+        )
         mutator = ConfigMutator(system_llm=self._system_llm_callback)
         config_creator = ConfigCreator(system_llm=self._system_llm_callback)
         snapshot_store = ConfigSnapshotStore(store_dir="/tmp/midas_snapshots")

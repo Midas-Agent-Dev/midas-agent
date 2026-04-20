@@ -60,8 +60,13 @@ class ExecutionResult:
 
 
 class DAGExecutor:
-    def __init__(self, action_registry: ActionRegistry) -> None:
+    def __init__(
+        self,
+        action_registry: ActionRegistry,
+        max_tool_output_chars: int | None = None,
+    ) -> None:
         self._action_registry = action_registry
+        self._max_tool_output_chars = max_tool_output_chars
 
     def set_work_dir(self, work_dir: str) -> None:
         """Propagate working directory to all actions that support it."""
@@ -82,6 +87,7 @@ class DAGExecutor:
         config: WorkflowConfig,
         issue: Issue,
         call_llm: Callable[[LLMRequest], LLMResponse],
+        balance_provider: Callable[[], int] | None = None,
     ) -> ExecutionResult:
         steps_by_id = {step.id: step for step in config.steps}
 
@@ -110,12 +116,13 @@ class DAGExecutor:
             # when we only have bash, str_replace_editor, task_done.
             actions = list(self._action_registry._actions.values())
 
-            # Create a ReactAgent and run it.
-            # No max_iterations — the token budget controls termination.
+            # Create a ReactAgent with context management.
             agent = ReactAgent(
                 system_prompt=step.prompt,
                 actions=actions,
                 call_llm=call_llm,
+                balance_provider=balance_provider,
+                max_tool_output_chars=self._max_tool_output_chars,
             )
 
             try:
