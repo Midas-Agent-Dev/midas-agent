@@ -163,7 +163,8 @@ class HiringManager:
             return self._run_spawned_agent(task, "explorer")
 
         skill_name = agent.skill.name if agent.skill else "none"
-        logger.info("  HiringManager: hiring %s (skill=%s, protected_by=%s)", agent_id, skill_name, agent.protected_by)
+        agent_type = "free" if agent.protected_by is None else "protected"
+        logger.info("  === BEGIN %s agent %s (skill=%s, type=%s) ===", agent_type, agent_id, skill_name, agent_type)
 
         # Build system prompt with skill content + sub-agent instructions
         from midas_agent.prompts import SUB_AGENT_INSTRUCTIONS
@@ -188,7 +189,9 @@ class HiringManager:
 
         result = sub_agent.run(context=task)
         agent._last_action_history = result.action_history
-        return reported.get("result") or result.output or "Agent completed with no output."
+        output = reported.get("result") or result.output or "Agent completed with no output."
+        logger.info("  === END %s agent %s (iters=%d) ===", agent_type, agent_id, result.iterations)
+        return output
 
     def _initialize_agent(self, agent, task: str, role: str) -> None:
         """Use SystemLLM to generate the agent's identity and initial skill."""
@@ -234,10 +237,12 @@ class HiringManager:
 
         agent = self._spawn_callback(task)
         aid = getattr(agent, "agent_id", None) or "new agent"
-        logger.info("  HiringManager: spawned %s (protected_by=%s)", aid, agent.protected_by)
+        agent_type = "free" if agent.protected_by is None else "protected"
 
         # Initialize agent identity via SystemLLM
         self._initialize_agent(agent, task, role)
+        skill_name = agent.skill.name if agent.skill else "none"
+        logger.info("  === BEGIN %s agent %s (skill=%s, role=%s) ===", agent_type, aid, skill_name, role)
 
         reported: dict = {}
         def on_report(text, _reported=reported):
@@ -260,7 +265,9 @@ class HiringManager:
         sub_context = f"[Spawned agent {aid}] {task}"
         result = sub_agent.run(context=sub_context)
         agent._last_action_history = result.action_history
-        return reported.get("result") or result.output or "Sub-agent completed with no output."
+        output = reported.get("result") or result.output or "Sub-agent completed with no output."
+        logger.info("  === END %s agent %s (iters=%d) ===", agent_type, aid, result.iterations)
+        return output
 
     # ------------------------------------------------------------------
     # Sub-agent action building (moved from DelegateTaskAction)

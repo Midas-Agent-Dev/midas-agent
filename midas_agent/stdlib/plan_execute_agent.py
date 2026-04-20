@@ -156,6 +156,7 @@ class PlanExecuteAgent(ReactAgent):
 
         iterations = 0
         action_history: list[ActionRecord] = []
+        logger.info("=== BEGIN responsible agent ===")
         messages: list[dict] = [{"role": "system", "content": self.system_prompt}]
 
         if context is not None:
