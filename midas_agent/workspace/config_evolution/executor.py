@@ -72,11 +72,9 @@ class DAGExecutor:
                     )
             context = "\n\n".join(context_parts)
 
-            # Get action subset from registry.
-            if step.tools:
-                actions = self._action_registry.get_subset(step.tools)
-            else:
-                actions = []
+            # Every step gets all tools — no point restricting
+            # when we only have bash, str_replace_editor, task_done.
+            actions = list(self._action_registry._actions.values())
 
             # Create a ReactAgent and run it.
             # No max_iterations — the token budget controls termination.
