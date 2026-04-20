@@ -187,14 +187,25 @@ class ConfigEvolutionWorkspace(Workspace):
         my_s_w = my_results.get("s_w", 0.0)
         cost = max(1, self.budget_received)
         eta = my_s_w / cost if cost > 0 else 0.0
+        config_yaml = _config_to_yaml(self._workflow_config)
         self._snapshot_store.save(ConfigSnapshot(
             episode_id=f"ep-{self._episode_count}",
             workspace_id=self.workspace_id,
-            config_yaml=_config_to_yaml(self._workflow_config),
+            config_yaml=config_yaml,
             eta=eta,
             score=my_s_w,
             cost=cost,
             summary=f"s_exec={my_score}",
         ))
+
+        # -- Export config YAML to disk for observability --
+        try:
+            config_log_dir = "/tmp/midas_output/configs"
+            os.makedirs(config_log_dir, exist_ok=True)
+            path = os.path.join(config_log_dir, f"{self.workspace_id}_ep{self._episode_count}.yaml")
+            with open(path, "w") as f:
+                f.write(config_yaml)
+        except Exception:
+            pass
 
         return None
