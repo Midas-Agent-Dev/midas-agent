@@ -108,11 +108,13 @@ Good:
 Bad: run tests, then read test file, then read source code, then investigate what tests cover
 
 ## Example 3: Worker
-Task: "In /testbed/astropy/modeling/separable.py, change line 245 from 'cright[...] = 1' to 'cright[...] = right'"
+Task: "Fix the _cstack function in /testbed/astropy/modeling/separable.py — when stacking coordinate matrices for nested CompoundModels, the right matrix values are being set to 1 instead of preserving the actual separability values. The bug is around line 245."
 Good:
-  str_replace_editor: str_replace old_str="cright[-right.shape[0]:, -right.shape[1]:] = 1" new_str="cright[-right.shape[0]:, -right.shape[1]:] = right"
-  task_done(result="Edited /testbed/astropy/modeling/separable.py line 245. Changed assignment from 1 to right.")
-Bad: read the whole function first, create a test script, analyze the impact, then make the edit\
+  str_replace_editor: view /testbed/astropy/modeling/separable.py view_range=[235,250]
+  str_replace_editor: str_replace the buggy assignment
+  bash: cd /testbed && python -c "from astropy.modeling import models as m; from astropy.modeling.separable import separability_matrix; print(separability_matrix(m.Pix2Sky_TAN() & (m.Linear1D(10) & m.Linear1D(5))))"
+  task_done(result="Fixed _cstack in /testbed/astropy/modeling/separable.py:245. Changed 'cright[...] = 1' to 'cright[...] = right'. Verified: nested CompoundModel now produces correct diagonal separability matrix.")
+Bad: re-read the entire file, re-analyze the bug from scratch, create new debug scripts, run full test suite\
 """
 
 # ---------------------------------------------------------------------------
