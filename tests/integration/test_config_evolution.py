@@ -29,6 +29,7 @@ from midas_agent.workspace.config_evolution.executor import (
     DAGExecutor,
     ExecutionResult,
 )
+from midas_agent.workspace.config_evolution.config_creator import ConfigCreator
 from midas_agent.workspace.config_evolution.mutator import ConfigMutator
 from midas_agent.workspace.config_evolution.snapshot_store import (
     ConfigSnapshot,
@@ -331,6 +332,7 @@ class TestSubmitPatchPersistsFile:
             system_llm=system_provider.complete,
             dag_executor=dag_executor,
             config_mutator=mutator,
+            config_creator=ConfigCreator(system_llm=system_provider.complete),
             snapshot_store=snapshot_store,
         )
         workspace.receive_budget(5000)
@@ -400,6 +402,7 @@ class TestSubmitPatchOnAbortedDAG:
             system_llm=system_provider.complete,
             dag_executor=dag_executor,
             config_mutator=mutator,
+            config_creator=ConfigCreator(system_llm=system_provider.complete),
             snapshot_store=snapshot_store,
         )
         workspace.receive_budget(5000)
@@ -467,6 +470,7 @@ class TestPostEpisodeSurvivalSelfRewrite:
             system_llm=system_provider.complete,
             dag_executor=dag_executor,
             config_mutator=mutator,
+            config_creator=ConfigCreator(system_llm=system_provider.complete),
             snapshot_store=snapshot_store,
         )
         workspace.receive_budget(5000)
@@ -530,6 +534,7 @@ class TestPostEpisodeEvictionReproduce:
             system_llm=system_provider.complete,
             dag_executor=dag_executor,
             config_mutator=mutator,
+            config_creator=ConfigCreator(system_llm=system_provider.complete),
             snapshot_store=snapshot_store,
         )
         workspace.receive_budget(5000)

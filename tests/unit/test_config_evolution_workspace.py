@@ -10,6 +10,7 @@ from midas_agent.workspace.config_evolution.config_schema import (
     StepConfig,
     WorkflowConfig,
 )
+from midas_agent.workspace.config_evolution.config_creator import ConfigCreator
 from midas_agent.workspace.config_evolution.executor import DAGExecutor, ExecutionResult
 from midas_agent.workspace.config_evolution.mutator import ConfigMutator
 from midas_agent.workspace.config_evolution.snapshot_store import ConfigSnapshotStore
@@ -47,6 +48,7 @@ class TestConfigEvolutionWorkspace:
             system_llm=self._make_call_llm(),
             dag_executor=MagicMock(spec=DAGExecutor),
             config_mutator=MagicMock(spec=ConfigMutator),
+            config_creator=MagicMock(spec=ConfigCreator),
             snapshot_store=MagicMock(spec=ConfigSnapshotStore),
         )
 
@@ -82,6 +84,7 @@ class TestConfigEvolutionWorkspace:
             system_llm=self._make_call_llm(),
             dag_executor=dag_executor,
             config_mutator=MagicMock(spec=ConfigMutator),
+            config_creator=MagicMock(spec=ConfigCreator),
             snapshot_store=MagicMock(spec=ConfigSnapshotStore),
         )
         issue = Issue(
@@ -101,23 +104,18 @@ class TestConfigEvolutionWorkspace:
         ws.submit_patch()  # Should not raise
         assert hasattr(ws, "_last_patch")
 
-    def test_post_episode_evicted_returns_new_config(self):
-        """An evicted workspace returns a new config dict from post_episode().
+    def test_post_episode_evicted_returns_none(self):
+        """An evicted workspace returns None from post_episode().
 
-        When workspace_id is in evicted_ids, post_episode triggers
-        ConfigMutator.reproduce() and returns a new YAML config dict.
+        Evicted workspaces no longer produce their own replacement config.
+        The scheduler seeds replacements with the best-η config.
         """
         ws = self._make_workspace()
 
-        eval_results = {
-            "ws-1": EvalResult(
-                workspace_id="ws-1", episode_id="ep-1",
-                s_exec=0.3, s_llm=0.2, s_w=0.36,
-            ),
-        }
+        eval_results = {"ws-1": {"s_w": 0.36, "s_exec": 0.3}}
         result = ws.post_episode(eval_results, evicted_ids=["ws-1"])
 
-        assert isinstance(result, dict)
+        assert result is None
 
     def test_post_episode_survivor_returns_none(self):
         """A surviving workspace returns None from post_episode().
@@ -127,12 +125,7 @@ class TestConfigEvolutionWorkspace:
         """
         ws = self._make_workspace()
 
-        eval_results = {
-            "ws-1": EvalResult(
-                workspace_id="ws-1", episode_id="ep-1",
-                s_exec=0.9, s_llm=None, s_w=0.9,
-            ),
-        }
+        eval_results = {"ws-1": {"s_w": 0.9, "s_exec": 0.9}}
         result = ws.post_episode(eval_results, evicted_ids=[])
 
         assert result is None

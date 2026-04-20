@@ -2,12 +2,12 @@
 from __future__ import annotations
 
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable
 
 from midas_agent.llm.types import LLMRequest, LLMResponse
 from midas_agent.stdlib.action import ActionRegistry
-from midas_agent.stdlib.react_agent import ReactAgent
+from midas_agent.stdlib.react_agent import ActionRecord, ReactAgent
 from midas_agent.types import Issue
 from midas_agent.workspace.config_evolution.config_schema import WorkflowConfig
 
@@ -22,6 +22,7 @@ class ExecutionResult:
     patch: str | None
     aborted: bool
     abort_step: str | None
+    action_history: list[ActionRecord] = field(default_factory=list)
 
 
 class DAGExecutor:
@@ -48,6 +49,7 @@ class DAGExecutor:
 
         # Step 2: Execute each step in topological order.
         step_outputs: dict[str, str] = {}
+        all_action_history: list[ActionRecord] = []
         aborted = False
         abort_step: str | None = None
 
@@ -86,6 +88,8 @@ class DAGExecutor:
                 abort_step = step_id
                 break
 
+            all_action_history.extend(result.action_history)
+
             # Check if the agent was aborted due to budget exhaustion.
             if result.termination_reason == "budget_exhausted":
                 aborted = True
@@ -102,6 +106,7 @@ class DAGExecutor:
             patch=patch,
             aborted=aborted,
             abort_step=abort_step,
+            action_history=all_action_history,
         )
 
     def _topological_sort(self, config: WorkflowConfig) -> list[str]:

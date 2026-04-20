@@ -1,0 +1,195 @@
+"""Config creator — generate workflow configs from successful execution traces.
+
+Two-pass approach:
+  1. Summarise the raw trace into an abstract experience summary (no
+     issue-specific details).
+  2. Generate a YAML workflow config from the abstract summary.
+"""
+from __future__ import annotations
+
+import logging
+import re
+from collections import Counter
+from typing import Callable
+
+import yaml
+
+from midas_agent.llm.types import LLMRequest, LLMResponse
+from midas_agent.stdlib.react_agent import ActionRecord
+from midas_agent.workspace.config_evolution.config_schema import (
+    ConfigMeta,
+    StepConfig,
+    WorkflowConfig,
+)
+
+logger = logging.getLogger(__name__)
+
+# Trace formatting limits
+MAX_TRACE_ITERATIONS = 60
+MAX_ARG_CHARS = 80
+MAX_RESULT_CHARS = 150
+
+
+# ------------------------------------------------------------------
+# Trace formatting helpers
+# ------------------------------------------------------------------
+
+def format_trace(action_history: list[ActionRecord]) -> str:
+    """Format action history into a compact, readable trace."""
+    lines: list[str] = []
+    for i, record in enumerate(action_history[:MAX_TRACE_ITERATIONS], 1):
+        args_parts: list[str] = []
+        for k, v in record.arguments.items():
+            v_str = v if isinstance(v, str) else repr(v)
+            if len(v_str) > MAX_ARG_CHARS:
+                v_str = v_str[:MAX_ARG_CHARS] + "..."
+            args_parts.append(f"{k}={v_str}")
+        args_str = ", ".join(args_parts)
+
+        result = record.result or "(empty)"
+        if len(result) > MAX_RESULT_CHARS:
+            result = result[:MAX_RESULT_CHARS] + "..."
+        result = result.replace("\n", " ").strip()
+
+        lines.append(f"[iter {i}] {record.action_name}({args_str}) → {result}")
+
+    if len(action_history) > MAX_TRACE_ITERATIONS:
+        lines.append(
+            f"... ({len(action_history) - MAX_TRACE_ITERATIONS} more iterations truncated)"
+        )
+    return "\n".join(lines)
+
+
+def _tool_usage_summary(action_history: list[ActionRecord]) -> str:
+    """Summarise tool usage counts, e.g. 'bash (32), str_replace_editor (12)'."""
+    counts = Counter(r.action_name for r in action_history)
+    return ", ".join(f"{name} ({count})" for name, count in counts.most_common())
+
+
+# ------------------------------------------------------------------
+# YAML parsing helpers
+# ------------------------------------------------------------------
+
+def _extract_yaml(text: str) -> str:
+    """Extract YAML from an LLM response that may include code fences."""
+    match = re.search(r"```ya?ml\s*\n(.*?)```", text, re.DOTALL)
+    if match:
+        return match.group(1).strip()
+    match = re.search(r"```\s*\n(.*?)```", text, re.DOTALL)
+    if match:
+        return match.group(1).strip()
+    return text.strip()
+
+
+def _parse_config_yaml(yaml_text: str) -> WorkflowConfig | None:
+    """Parse YAML text into a WorkflowConfig.  Returns None on failure."""
+    try:
+        data = yaml.safe_load(yaml_text)
+        if not isinstance(data, dict) or "steps" not in data:
+            return None
+
+        meta_data = data.get("meta", {})
+        meta = ConfigMeta(
+            name=meta_data.get("name", "generated"),
+            description=meta_data.get("description", "auto-generated from trace"),
+        )
+
+        steps: list[StepConfig] = []
+        for s in data["steps"]:
+            steps.append(StepConfig(
+                id=s.get("id", f"step_{len(steps)}"),
+                prompt=s.get("prompt", ""),
+                tools=s.get("tools", []),
+                inputs=s.get("inputs", []),
+            ))
+
+        if not steps:
+            return None
+        return WorkflowConfig(meta=meta, steps=steps)
+    except Exception as e:
+        logger.warning("Failed to parse config YAML: %s", e)
+        return None
+
+
+# ------------------------------------------------------------------
+# ConfigCreator
+# ------------------------------------------------------------------
+
+class ConfigCreator:
+    """Generate workflow configs from successful execution traces."""
+
+    def __init__(
+        self,
+        system_llm: Callable[[LLMRequest], LLMResponse],
+    ) -> None:
+        self._system_llm = system_llm
+
+    def create_config(
+        self,
+        action_history: list[ActionRecord],
+        score: float,
+    ) -> WorkflowConfig | None:
+        """Two-pass config generation.  Returns None if either pass fails."""
+        from midas_agent.prompts import (
+            CONFIG_CREATION_SUMMARIZE_PROMPT,
+            CONFIG_CREATION_GENERATE_PROMPT,
+        )
+
+        if not action_history:
+            return None
+
+        # -- Pass 1: trace → abstract summary --
+        formatted = format_trace(action_history)
+        tool_summary = _tool_usage_summary(action_history)
+
+        summarize_prompt = CONFIG_CREATION_SUMMARIZE_PROMPT.format(
+            iteration_count=len(action_history),
+            score=score,
+            formatted_trace=formatted,
+            tool_usage_summary=tool_summary,
+        )
+
+        try:
+            resp = self._system_llm(
+                LLMRequest(messages=[{"role": "user", "content": summarize_prompt}],
+                           model="default"),
+            )
+        except Exception as e:
+            logger.warning("Config creation pass 1 failed: %s", e)
+            return None
+
+        summary = (resp.content or "").strip()
+        if not summary:
+            logger.warning("Config creation pass 1 returned empty summary")
+            return None
+
+        logger.info("Config creation pass 1 done (%d chars)", len(summary))
+
+        # -- Pass 2: summary → YAML config --
+        generate_prompt = CONFIG_CREATION_GENERATE_PROMPT.format(
+            score=score,
+            summary=summary,
+            iteration_count=len(action_history),
+        )
+
+        try:
+            resp = self._system_llm(
+                LLMRequest(messages=[{"role": "user", "content": generate_prompt}],
+                           model="default"),
+            )
+        except Exception as e:
+            logger.warning("Config creation pass 2 failed: %s", e)
+            return None
+
+        raw_yaml = _extract_yaml(resp.content or "")
+        if not raw_yaml:
+            logger.warning("Config creation pass 2 returned empty response")
+            return None
+
+        config = _parse_config_yaml(raw_yaml)
+        if config is None:
+            logger.warning("Config creation: failed to parse YAML")
+            return None
+
+        logger.info("Config created: '%s' (%d steps)", config.meta.name, len(config.steps))
+        return config

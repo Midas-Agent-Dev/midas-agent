@@ -126,6 +126,7 @@ class WorkspaceManager:
             StepConfig,
             WorkflowConfig,
         )
+        from midas_agent.workspace.config_evolution.config_creator import ConfigCreator
         from midas_agent.workspace.config_evolution.executor import DAGExecutor
         from midas_agent.workspace.config_evolution.mutator import ConfigMutator
         from midas_agent.workspace.config_evolution.snapshot_store import (
@@ -140,9 +141,11 @@ class WorkspaceManager:
             StrReplaceEditorAction(),
             TaskDoneAction(),
         ]
+        all_tool_names = [a.name for a in all_actions]
         registry = ActionRegistry(all_actions)
         dag_executor = DAGExecutor(action_registry=registry)
         mutator = ConfigMutator(system_llm=self._system_llm_callback)
+        config_creator = ConfigCreator(system_llm=self._system_llm_callback)
         snapshot_store = ConfigSnapshotStore(store_dir="/tmp/midas_snapshots")
 
         # Build workflow config from initial_config or use a default.
@@ -162,9 +165,18 @@ class WorkspaceManager:
                 ))
             workflow_config = WorkflowConfig(meta=meta, steps=steps)
         else:
+            # Default: single-step general agent with full system prompt
+            # and all tools.  This runs as a plain ReactAgent until the
+            # first successful episode triggers config creation.
+            from midas_agent.prompts import SYSTEM_PROMPT
+
             workflow_config = WorkflowConfig(
-                meta=ConfigMeta(name=workspace_id, description="auto"),
-                steps=[StepConfig(id="main", prompt="Solve the issue.")],
+                meta=ConfigMeta(name=workspace_id, description="default single-step"),
+                steps=[StepConfig(
+                    id="main",
+                    prompt=SYSTEM_PROMPT,
+                    tools=all_tool_names,
+                )],
             )
 
         return ConfigEvolutionWorkspace(
@@ -174,6 +186,7 @@ class WorkspaceManager:
             system_llm=self._system_llm_callback,
             dag_executor=dag_executor,
             config_mutator=mutator,
+            config_creator=config_creator,
             snapshot_store=snapshot_store,
         )
 

@@ -207,16 +207,53 @@ class Scheduler:
         """Return all workspace IDs evicted across all episodes."""
         return set(self._all_evicted_ever)
 
-    def replace_evicted(self, new_configs: list[dict]) -> None:
-        """Replace previously evicted workspaces with new ones."""
+    def replace_evicted(self, new_configs: list[dict] | None = None) -> None:
+        """Replace previously evicted workspaces with new ones.
+
+        Each replacement is seeded with the best-η workspace's config.
+        The *new_configs* parameter is accepted for backward compatibility
+        but ignored — the scheduler now sources the config itself.
+        """
         all_evicted = self.get_all_evictions()
-        for i, new_config in enumerate(new_configs):
-            old_id = (
-                all_evicted[i] if i < len(all_evicted) else None
-            )
-            if old_id is not None:
-                new_id = f"ws-{self._episode_count}-new-{i}"
-                self._workspace_manager.replace(old_id, new_id, new_config)
+        if not all_evicted:
+            return
+
+        best_config = self._get_best_config()
+
+        for i, old_id in enumerate(all_evicted):
+            new_id = f"ws-{self._episode_count}-new-{i}"
+            self._workspace_manager.replace(old_id, new_id, best_config)
+
+    def _get_best_config(self) -> dict | None:
+        """Extract the workflow config from the highest-η workspace as a dict."""
+        if not self._last_etas:
+            return None
+
+        best_ws_id = max(self._last_etas, key=self._last_etas.get)
+        workspaces = self._workspace_manager.list_workspaces()
+
+        for ws in workspaces:
+            if ws.workspace_id == best_ws_id:
+                wf_config = getattr(ws, "_workflow_config", None)
+                if wf_config is None:
+                    return None
+                return {
+                    "meta": {
+                        "name": wf_config.meta.name,
+                        "description": wf_config.meta.description,
+                    },
+                    "steps": [
+                        {
+                            "id": s.id,
+                            "prompt": s.prompt,
+                            "tools": s.tools,
+                            "inputs": s.inputs,
+                        }
+                        for s in wf_config.steps
+                    ],
+                }
+
+        return None
 
     # ------------------------------------------------------------------
     # LLM callback factories

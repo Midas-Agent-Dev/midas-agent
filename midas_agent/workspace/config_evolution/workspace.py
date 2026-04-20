@@ -1,6 +1,7 @@
 """ConfigEvolutionWorkspace — Workspace implementation for Configuration Evolution."""
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 import uuid
@@ -9,10 +10,16 @@ from typing import Callable
 from midas_agent.llm.types import LLMRequest, LLMResponse
 from midas_agent.types import Issue
 from midas_agent.workspace.base import Workspace
+from midas_agent.workspace.config_evolution.config_creator import ConfigCreator
 from midas_agent.workspace.config_evolution.config_schema import WorkflowConfig
 from midas_agent.workspace.config_evolution.executor import DAGExecutor, ExecutionResult
 from midas_agent.workspace.config_evolution.mutator import ConfigMutator
 from midas_agent.workspace.config_evolution.snapshot_store import ConfigSnapshotStore
+
+logger = logging.getLogger(__name__)
+
+# Step id used by the default single-step config (pre-first-success).
+_DEFAULT_STEP_ID = "main"
 
 
 class ConfigEvolutionWorkspace(Workspace):
@@ -24,6 +31,7 @@ class ConfigEvolutionWorkspace(Workspace):
         system_llm: Callable[[LLMRequest], LLMResponse],
         dag_executor: DAGExecutor,
         config_mutator: ConfigMutator,
+        config_creator: ConfigCreator,
         snapshot_store: ConfigSnapshotStore,
     ) -> None:
         super().__init__(workspace_id, call_llm, system_llm)
@@ -32,9 +40,25 @@ class ConfigEvolutionWorkspace(Workspace):
         self._system_llm = system_llm
         self._dag_executor = dag_executor
         self._config_mutator = config_mutator
+        self._config_creator = config_creator
         self._snapshot_store = snapshot_store
         self._budget = 0
         self._last_result: ExecutionResult | None = None
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _is_default_config(self) -> bool:
+        """True when the workspace still has the initial single-step config."""
+        return (
+            len(self._workflow_config.steps) == 1
+            and self._workflow_config.steps[0].id == _DEFAULT_STEP_ID
+        )
+
+    # ------------------------------------------------------------------
+    # Workspace lifecycle
+    # ------------------------------------------------------------------
 
     def receive_budget(self, amount: int) -> None:
         self._budget += amount
@@ -93,18 +117,53 @@ class ConfigEvolutionWorkspace(Workspace):
 
     def post_episode(self, eval_results: dict, evicted_ids: list[str]) -> dict | None:
         self.calls.append(("post_episode", {"eval_results": eval_results, "evicted_ids": evicted_ids}))
+
+        # -- Config creation on first success --
+        # If we still have the default single-step config and this episode
+        # scored a perfect execution score, generate a real multi-step
+        # config from the successful trace.
+        my_results = eval_results.get(self.workspace_id, {})
+        my_score = my_results.get("s_exec", 0.0)
+
+        if (
+            my_score >= 1.0
+            and self._is_default_config()
+            and self._last_result is not None
+            and self._last_result.action_history
+        ):
+            generated = self._config_creator.create_config(
+                action_history=self._last_result.action_history,
+                score=my_score,
+            )
+            if generated is not None:
+                self._workflow_config = generated
+                logger.info(
+                    "Workspace %s: created config '%s' (%d steps) from first success",
+                    self.workspace_id,
+                    generated.meta.name,
+                    len(generated.steps),
+                )
+                return None  # survived, config upgraded
+
+        # -- Normal post-episode flow --
         if self.workspace_id in evicted_ids:
-            # Evicted: reproduce a new config variant.
-            result = self._config_mutator.reproduce(
-                self._workflow_config, summaries=["evicted"],
-            )
-            if isinstance(result, dict):
-                return result
-            return {"reproduced": True}
+            # Evicted: nothing to do.  The scheduler will replace this
+            # workspace with a new one seeded from the best-η config.
+            return None
         else:
-            # Survived: self-rewrite the current config.
-            new_config = self._config_mutator.self_rewrite(
-                self._workflow_config, summary="survived",
+            # Survived: reflective self-rewrite using real trace data.
+            # Skip mutation for the default single-step config — it awaits
+            # config creation on first success, not incremental mutation.
+            has_trace = (
+                self._last_result is not None
+                and self._last_result.action_history
             )
-            self._workflow_config = new_config
+            if not self._is_default_config() and has_trace:
+                new_config = self._config_mutator.reflective_self_rewrite(
+                    config=self._workflow_config,
+                    action_history=self._last_result.action_history,
+                    score=my_score,
+                )
+                self._workflow_config = new_config
+            # else: keep current config as-is (default config or no trace)
             return None

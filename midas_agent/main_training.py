@@ -300,21 +300,16 @@ def run_training(
             if evicted:
                 logger.info("  Evicted: %s", evicted)
 
-            # 6. Post-episode
-            new_configs: list[dict] = []
+            # 6. Post-episode (config creation / reflective mutation)
+            eval_results_dict = {
+                ws_id: {"s_w": r.s_w, "s_exec": r.s_exec}
+                for ws_id, r in eval_results.items()
+            }
             for ws in workspaces:
-                result = ws.post_episode(
-                    eval_results={
-                        ws_id: {"s_w": r.s_w, "s_exec": r.s_exec}
-                        for ws_id, r in eval_results.items()
-                    },
-                    evicted_ids=evicted,
-                )
-                if result is not None:
-                    new_configs.append(result)
+                ws.post_episode(eval_results_dict, evicted_ids=evicted)
 
-            # 7. Replace evicted workspaces
-            scheduler.replace_evicted(new_configs)
+            # 7. Replace evicted workspaces (seeded with best-η config)
+            scheduler.replace_evicted()
 
         finally:
             # 8. Clean up containers and repo copies

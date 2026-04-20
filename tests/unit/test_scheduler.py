@@ -177,17 +177,30 @@ class TestScheduler:
         workspace_manager.create.assert_called()
 
     def test_replace_evicted(self):
-        """replace_evicted() delegates to WorkspaceManager."""
+        """replace_evicted() seeds replacements with the best-η config."""
         workspace_manager = MagicMock(spec=WorkspaceManager)
+
+        # Create a mock workspace with a workflow config for best-η lookup.
+        from midas_agent.workspace.config_evolution.config_schema import (
+            ConfigMeta, StepConfig, WorkflowConfig,
+        )
+        mock_ws = MagicMock()
+        mock_ws.workspace_id = "ws-survivor"
+        mock_ws._workflow_config = WorkflowConfig(
+            meta=ConfigMeta(name="best", description="best config"),
+            steps=[StepConfig(id="s1", prompt="do it", tools=["bash"])],
+        )
+        workspace_manager.list_workspaces.return_value = [mock_ws]
+
         scheduler = _make_scheduler(workspace_manager=workspace_manager)
 
-        # Seed evicted IDs so replace_evicted has workspaces to replace.
-        scheduler._evicted_ids = ["ws-old-1", "ws-old-2"]
+        # Seed evicted IDs and etas so replace_evicted can find the best.
+        scheduler._evicted_ids = ["ws-old-1"]
+        scheduler._last_etas = {"ws-survivor": 0.9, "ws-old-1": 0.1}
 
-        new_configs = [{"name": "ws-new-1"}, {"name": "ws-new-2"}]
-        scheduler.replace_evicted(new_configs)
+        scheduler.replace_evicted()
 
-        workspace_manager.replace.assert_called()
+        workspace_manager.replace.assert_called_once()
 
     def test_get_metered_llm_callback(self):
         """get_metered_llm_callback() returns a callable that goes through ResourceMeter."""
