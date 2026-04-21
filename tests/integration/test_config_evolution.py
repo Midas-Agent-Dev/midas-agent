@@ -116,7 +116,10 @@ def _make_workspace(
         call_llm=call_llm,
         system_llm=system_llm,
         dag_executor=DAGExecutor(action_registry=registry),
-        prompt_optimizer=GEPAConfigOptimizer(system_llm=system_llm),
+        prompt_optimizer=GEPAConfigOptimizer(
+            system_llm=system_llm,
+            data_dir=os.path.join(temp_dir, "data"),
+        ),
         config_creator=ConfigCreator(system_llm=system_llm),
         snapshot_store=ConfigSnapshotStore(store_dir=os.path.join(temp_dir, "snapshots")),
     )
@@ -460,8 +463,8 @@ class TestConfigCreationInWorkspace:
 
 @pytest.mark.integration
 class TestGEPAOptimizer:
-    def test_optimizer_records_episodes_from_workspace(self, temp_dir):
-        """post_episode records episode data into the GEPA optimizer."""
+    def test_successful_episode_recorded(self, temp_dir):
+        """post_episode with s_exec=1.0 records full trace into GEPA optimizer."""
         multi_step_config = _make_config(
             StepConfig(id="localize", prompt="Find.", tools=["bash", "str_replace_editor"], inputs=[]),
             StepConfig(id="fix", prompt="Fix.", tools=["bash", "str_replace_editor"], inputs=["localize"]),
@@ -478,7 +481,6 @@ class TestGEPAOptimizer:
             temp_dir=temp_dir,
         )
 
-        # Inject a fake execution result directly (avoids DAG executor hang)
         ws._last_result = ExecutionResult(
             step_outputs={"localize": "found", "fix": "fixed", "validate": "passed"},
             patch="diff...",
@@ -493,12 +495,48 @@ class TestGEPAOptimizer:
         ws._last_issue = _make_issue()
 
         ws.post_episode(
-            eval_results={"ws-0": {"s_w": 0.8, "s_exec": 0.8}},
+            eval_results={"ws-0": {"s_w": 1.0, "s_exec": 1.0}},
             evicted_ids=[],
         )
 
-        # Episode should be recorded in the optimizer's dataset
+        # Successful episode should be recorded
         assert ws._prompt_optimizer.dataset.size == 1
+        # Data file should be persisted
+        data_files = os.listdir(os.path.join(temp_dir, "data"))
+        assert len(data_files) == 1
+
+    def test_failed_episode_not_recorded(self, temp_dir):
+        """post_episode with s_exec < 1.0 does NOT record into GEPA optimizer."""
+        multi_step_config = _make_config(
+            StepConfig(id="localize", prompt="Find.", tools=["bash", "str_replace_editor"], inputs=[]),
+            StepConfig(id="fix", prompt="Fix.", tools=["bash", "str_replace_editor"], inputs=["localize"]),
+            name="localize-fix",
+        )
+
+        ws = _make_workspace(
+            workspace_id="ws-0",
+            config=multi_step_config,
+            temp_dir=temp_dir,
+        )
+
+        ws._last_result = ExecutionResult(
+            step_outputs={"localize": "found"},
+            patch="",
+            aborted=True,
+            abort_step="fix",
+            action_history=[
+                ActionRecord("bash", {"command": "grep bug ."}, "nothing", 1.0),
+            ],
+        )
+        ws._last_issue = _make_issue()
+
+        ws.post_episode(
+            eval_results={"ws-0": {"s_w": 0.2, "s_exec": 0.2}},
+            evicted_ids=[],
+        )
+
+        # Failed episode should NOT be recorded
+        assert ws._prompt_optimizer.dataset.size == 0
 
     def test_optimizer_does_not_run_before_interval(self, temp_dir):
         """GEPA should not run until enough episodes have accumulated."""
@@ -508,7 +546,7 @@ class TestGEPAOptimizer:
             min_dataset_size=5,
         )
         for i in range(3):
-            opt.record_episode(f"task_{i}", f"summary_{i}", 0.5)
+            opt.record_episode(f"task_{i}", f"trace_{i}", 1.0)
 
         config = _make_config(
             StepConfig(id="s1", prompt="Do.", tools=["bash"]),
@@ -524,7 +562,7 @@ class TestGEPAOptimizer:
             min_dataset_size=5,
         )
         for i in range(5):
-            opt.record_episode(f"task_{i}", f"summary_{i}", 0.5)
+            opt.record_episode(f"task_{i}", f"trace_{i}", 1.0)
 
         assert opt.should_optimize()
 

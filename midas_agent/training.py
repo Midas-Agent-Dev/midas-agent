@@ -7,6 +7,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+from datetime import datetime
 
 from midas_agent.config import MidasConfig
 from midas_agent.evaluation.criteria_cache import CriteriaCache
@@ -140,6 +141,13 @@ def run_training(
     7. Replace evicted workspaces
     8. Clean up repo
     """
+    # -- Create training directory --
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    train_dir = os.path.join(".midas", "train", timestamp)
+    os.makedirs(os.path.join(train_dir, "data"), exist_ok=True)
+    os.makedirs(os.path.join(train_dir, "log", "configs"), exist_ok=True)
+    os.makedirs(os.path.join(train_dir, "log", "action_logs"), exist_ok=True)
+
     # -- Wire up all components --
     storage = InMemoryStorageBackend()
     hooks = HookSet()
@@ -178,6 +186,7 @@ def run_training(
             lambda req: resource_meter.process(req, entity_id=ws_id)
         ),
         system_llm_callback=lambda req: system_llm.call(req),
+        train_dir=train_dir,
     )
 
     eval_provider = _make_llm_provider(
@@ -187,7 +196,9 @@ def run_training(
     )
     from midas_agent.evaluation.swebench_scorer import SWEBenchScorer
     execution_scorer = SWEBenchScorer(timeout=1800)
-    criteria_cache = CriteriaCache(cache_dir="/tmp/midas_criteria")
+    criteria_cache = CriteriaCache(
+        cache_dir=os.path.join(train_dir, "log", "criteria_cache"),
+    )
     llm_judge = LLMJudge(
         llm_provider=eval_provider, criteria_cache=criteria_cache,
     )
@@ -213,7 +224,7 @@ def run_training(
     if issues is None:
         issues = load_swe_bench()
 
-    patches_base_dir = "/tmp/patches"
+    patches_base_dir = os.path.join(train_dir, "log", "patches")
 
     # -- Create workspaces once --
     scheduler.create_workspaces()
@@ -317,19 +328,20 @@ def run_training(
     workspace_manager.close_all_action_logs(remove_empty=True)
 
     # -- Export training artifacts --
-    _export_artifacts(config, scheduler, training_log)
+    _export_artifacts(config, scheduler, training_log, train_dir)
 
-    logger.info("Training complete. %d episodes.", len(issues))
+    logger.info("Training complete. %d episodes. Artifacts in %s", len(issues), train_dir)
 
 
 def _export_artifacts(
     config: MidasConfig,
     scheduler: Scheduler,
     training_log: TrainingLog | None = None,
+    train_dir: str = "/tmp/midas_output",
 ) -> None:
     """Export training artifacts to disk after training completes."""
     try:
-        _do_export(config, scheduler, training_log)
+        _do_export(config, scheduler, training_log, train_dir)
     except Exception as e:
         logger.debug("Export skipped: %s", e)
 
@@ -338,10 +350,11 @@ def _do_export(
     config: MidasConfig,
     scheduler: Scheduler,
     training_log: TrainingLog | None = None,
+    train_dir: str = "/tmp/midas_output",
 ) -> None:
     import os
 
-    output_dir = "/tmp/midas_output"
+    output_dir = os.path.join(train_dir, "log")
     os.makedirs(output_dir, exist_ok=True)
 
     workspaces = scheduler.get_workspaces()

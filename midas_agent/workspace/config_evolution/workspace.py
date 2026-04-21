@@ -136,18 +136,39 @@ class ConfigEvolutionWorkspace(Workspace):
     def post_episode(self, eval_results: dict, evicted_ids: list[str]) -> dict | None:
         self.calls.append(("post_episode", {"eval_results": eval_results, "evicted_ids": evicted_ids}))
 
+        # -- Evaluate this episode --
+        my_results = eval_results.get(self.workspace_id, {})
+        my_score = my_results.get("s_exec", 0.0)
+        has_trace = (
+            self._last_result is not None
+            and self._last_result.action_history
+        )
+
+        # -- Record successful episodes for GEPA (before config creation) --
+        if (
+            my_score >= 1.0
+            and has_trace
+            and self._last_issue is not None
+        ):
+            from midas_agent.workspace.config_evolution.config_creator import (
+                format_trace,
+            )
+            full_trace = format_trace(self._last_result.action_history)
+            self._prompt_optimizer.record_episode(
+                task_input=self._last_issue.description,
+                action_summary=full_trace,
+                score=my_score,
+                issue_id=self._last_issue.issue_id,
+            )
+
         # -- Config creation on first success --
         # If we still have the default single-step config and this episode
         # scored a perfect execution score, generate a real multi-step
         # config from the successful trace.
-        my_results = eval_results.get(self.workspace_id, {})
-        my_score = my_results.get("s_exec", 0.0)
-
         if (
             my_score >= 1.0
             and self._is_default_config()
-            and self._last_result is not None
-            and self._last_result.action_history
+            and has_trace
         ):
             generated = self._config_creator.create_config(
                 action_history=self._last_result.action_history,
@@ -162,27 +183,6 @@ class ConfigEvolutionWorkspace(Workspace):
                     len(generated.steps),
                 )
                 return None  # survived, config upgraded
-
-        # -- Record episode data for GEPA --
-        has_trace = (
-            self._last_result is not None
-            and self._last_result.action_history
-        )
-        if has_trace and self._last_issue is not None:
-            from midas_agent.workspace.config_evolution.config_creator import (
-                format_trace,
-                _tool_usage_summary,
-            )
-            action_summary = (
-                f"score={my_score} | "
-                f"tools: {_tool_usage_summary(self._last_result.action_history)} | "
-                f"steps: {len(self._last_result.action_history)}"
-            )
-            self._prompt_optimizer.record_episode(
-                task_input=self._last_issue.description,
-                action_summary=action_summary,
-                score=my_score,
-            )
 
         # -- Normal post-episode flow --
         if self.workspace_id in evicted_ids:
@@ -219,7 +219,11 @@ class ConfigEvolutionWorkspace(Workspace):
 
         # -- Export config YAML to disk for observability --
         try:
-            config_log_dir = "/tmp/midas_output/configs"
+            store_dir = getattr(self._snapshot_store, "store_dir", None)
+            if store_dir:
+                config_log_dir = os.path.join(os.path.dirname(store_dir), "configs")
+            else:
+                config_log_dir = "/tmp/midas_output/configs"
             os.makedirs(config_log_dir, exist_ok=True)
             path = os.path.join(config_log_dir, f"{self.workspace_id}_ep{self._episode_count}.yaml")
             with open(path, "w") as f:

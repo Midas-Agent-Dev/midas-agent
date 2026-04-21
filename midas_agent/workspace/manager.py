@@ -18,13 +18,14 @@ class WorkspaceManager:
         config: MidasConfig,
         call_llm_factory: Callable[[str], Callable],
         system_llm_callback: Callable[[LLMRequest], LLMResponse],
-        action_log_dir: str = "/tmp/midas_action_logs",
+        train_dir: str = "/tmp/midas_train",
     ) -> None:
         self._config = config
         self._call_llm_factory = call_llm_factory
         self._system_llm_callback = system_llm_callback
         self._workspaces: dict[str, Workspace] = {}
-        self._action_log_dir = action_log_dir
+        self._train_dir = train_dir
+        self._action_log_dir = os.path.join(train_dir, "log", "action_logs")
         self._action_log_handles: dict[str, IO] = {}
         os.makedirs(self._action_log_dir, exist_ok=True)
         # Remove stale JSONL files from previous runs
@@ -151,9 +152,14 @@ class WorkspaceManager:
             max_context_tokens=self._config.max_context_tokens,
             system_llm=self._system_llm_callback,
         )
-        prompt_optimizer = GEPAConfigOptimizer(system_llm=self._system_llm_callback)
+        prompt_optimizer = GEPAConfigOptimizer(
+            system_llm=self._system_llm_callback,
+            data_dir=os.path.join(self._train_dir, "data"),
+        )
         config_creator = ConfigCreator(system_llm=self._system_llm_callback)
-        snapshot_store = ConfigSnapshotStore(store_dir="/tmp/midas_snapshots")
+        snapshot_store = ConfigSnapshotStore(
+            store_dir=os.path.join(self._train_dir, "log", "snapshots"),
+        )
 
         # Build workflow config from initial_config or use a default.
         if initial_config and "meta" in initial_config and "steps" in initial_config:

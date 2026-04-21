@@ -12,8 +12,10 @@ Architecture:
 """
 from __future__ import annotations
 
+import json
 import logging
 import math
+import os
 from types import SimpleNamespace
 from typing import Callable
 
@@ -215,12 +217,16 @@ class GEPAConfigOptimizer:
         system_llm: Callable[[LLMRequest], LLMResponse],
         gepa_interval: int = DEFAULT_GEPA_INTERVAL,
         min_dataset_size: int = MIN_DATASET_SIZE,
+        data_dir: str | None = None,
     ) -> None:
         self._system_llm = system_llm
         self._gepa_interval = gepa_interval
         self._min_dataset_size = min_dataset_size
         self._dataset = ConfigDatasetBuilder()
         self._episodes_since_last_optimization = 0
+        self._data_dir = data_dir
+        if data_dir:
+            os.makedirs(data_dir, exist_ok=True)
 
     @property
     def dataset(self) -> ConfigDatasetBuilder:
@@ -231,10 +237,31 @@ class GEPAConfigOptimizer:
         task_input: str,
         action_summary: str,
         score: float,
+        issue_id: str = "",
     ) -> None:
-        """Record an episode's data for future GEPA optimization."""
+        """Record a successful episode's data for future GEPA optimization.
+
+        Only called for episodes with s_exec >= 1.0.  The action_summary
+        should be the full execution trace (from format_trace), not a
+        stats string.
+        """
         self._dataset.add_episode(task_input, action_summary, score)
         self._episodes_since_last_optimization += 1
+
+        # Persist to disk for cross-run reuse
+        if self._data_dir:
+            ep_num = self._dataset.size
+            filename = f"ep{ep_num}_{issue_id}.json" if issue_id else f"ep{ep_num}.json"
+            data = {
+                "issue_id": issue_id,
+                "issue_description": task_input,
+                "trace": action_summary,
+                "score": score,
+            }
+            path = os.path.join(self._data_dir, filename)
+            with open(path, "w") as f:
+                json.dump(data, f, indent=2)
+            logger.info("GEPA: saved episode data to %s", path)
 
     def should_optimize(self) -> bool:
         """Check whether it's time to run GEPA."""

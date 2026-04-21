@@ -1,4 +1,5 @@
 """Unit tests for config mutation utilities and GEPAConfigOptimizer."""
+import os
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -208,10 +209,29 @@ class TestGEPAConfigOptimizer:
         opt = GEPAConfigOptimizer(system_llm=_make_system_llm())
         assert opt is not None
 
+    def test_construction_with_data_dir(self, tmp_path):
+        data_dir = str(tmp_path / "data")
+        opt = GEPAConfigOptimizer(system_llm=_make_system_llm(), data_dir=data_dir)
+        assert os.path.isdir(data_dir)
+
     def test_record_episode(self):
         opt = GEPAConfigOptimizer(system_llm=_make_system_llm())
-        opt.record_episode("task", "summary", 0.5)
+        opt.record_episode("task", "trace text", 1.0)
         assert opt.dataset.size == 1
+
+    def test_record_episode_persists_to_disk(self, tmp_path):
+        data_dir = str(tmp_path / "data")
+        opt = GEPAConfigOptimizer(system_llm=_make_system_llm(), data_dir=data_dir)
+        opt.record_episode("Fix the bug", "[iter 1] bash(...)", 1.0, issue_id="astropy-123")
+        files = os.listdir(data_dir)
+        assert len(files) == 1
+        assert "astropy-123" in files[0]
+        import json
+        with open(os.path.join(data_dir, files[0])) as f:
+            data = json.load(f)
+        assert data["issue_id"] == "astropy-123"
+        assert data["trace"] == "[iter 1] bash(...)"
+        assert data["score"] == 1.0
 
     def test_should_not_optimize_before_interval(self):
         opt = GEPAConfigOptimizer(
@@ -220,7 +240,7 @@ class TestGEPAConfigOptimizer:
             min_dataset_size=5,
         )
         for i in range(4):
-            opt.record_episode(f"task_{i}", f"summary_{i}", 0.5)
+            opt.record_episode(f"task_{i}", f"trace_{i}", 1.0)
         assert not opt.should_optimize()
 
     def test_should_optimize_after_interval(self):
@@ -230,7 +250,7 @@ class TestGEPAConfigOptimizer:
             min_dataset_size=5,
         )
         for i in range(5):
-            opt.record_episode(f"task_{i}", f"summary_{i}", 0.5)
+            opt.record_episode(f"task_{i}", f"trace_{i}", 1.0)
         assert opt.should_optimize()
 
     def test_maybe_optimize_returns_original_before_interval(self):
