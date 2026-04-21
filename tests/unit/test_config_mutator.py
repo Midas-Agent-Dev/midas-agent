@@ -21,6 +21,8 @@ from midas_agent.workspace.config_evolution.prompt_optimizer import (
     GEPAConfigOptimizer,
     StepPromptModule,
     config_fitness_metric,
+    make_judge_metric,
+    _parse_judge_response,
 )
 
 
@@ -131,38 +133,62 @@ class TestStepPromptModule:
 
 @pytest.mark.unit
 class TestConfigFitnessMetric:
-    def test_empty_output_zero_accuracy(self):
-        example = SimpleNamespace(expected_behavior="some expected output")
-        prediction = SimpleNamespace(output="")
-        result = config_fitness_metric(example, prediction)
-        assert result["scores"]["accuracy"] == 0.0
-        assert result["scores"]["brevity"] == 1.0
+    """Tests for the fallback word-overlap metric."""
 
-    def test_perfect_overlap(self):
+    def test_returns_score_and_feedback(self):
         example = SimpleNamespace(expected_behavior="find the bug using grep")
         prediction = SimpleNamespace(output="find the bug using grep")
         result = config_fitness_metric(example, prediction)
-        assert result["scores"]["accuracy"] == 1.0
+        assert "score" in result
+        assert "feedback" in result
 
-    def test_partial_overlap(self):
+    def test_empty_output_low_score(self):
+        example = SimpleNamespace(expected_behavior="some expected output")
+        prediction = SimpleNamespace(output="")
+        result = config_fitness_metric(example, prediction)
+        assert result["score"] < 0.5
+
+    def test_perfect_overlap_high_score(self):
         example = SimpleNamespace(expected_behavior="find the bug using grep")
-        prediction = SimpleNamespace(output="find the bug with search")
+        prediction = SimpleNamespace(output="find the bug using grep")
         result = config_fitness_metric(example, prediction)
-        assert 0.3 < result["scores"]["accuracy"] < 1.0
+        assert result["score"] > 0.5
 
-    def test_brevity_decreases_with_length(self):
-        example = SimpleNamespace(expected_behavior="short")
-        short_pred = SimpleNamespace(output="a" * 100)
-        long_pred = SimpleNamespace(output="a" * 1500)
-        short_result = config_fitness_metric(example, short_pred)
-        long_result = config_fitness_metric(example, long_pred)
-        assert short_result["scores"]["brevity"] > long_result["scores"]["brevity"]
 
-    def test_brevity_zero_at_ceiling(self):
-        example = SimpleNamespace(expected_behavior="short")
-        prediction = SimpleNamespace(output="a" * 2000)
-        result = config_fitness_metric(example, prediction)
-        assert result["scores"]["brevity"] == 0.0
+@pytest.mark.unit
+class TestJudgeMetric:
+    """Tests for LLM-as-judge metric and helpers."""
+
+    def test_parse_judge_response_valid(self):
+        text = "SCORE: 0.8\nFEEDBACK: Good strategy alignment."
+        score, feedback = _parse_judge_response(text)
+        assert score == 0.8
+        assert "Good strategy" in feedback
+
+    def test_parse_judge_response_missing_score(self):
+        score, feedback = _parse_judge_response("no score here")
+        assert score == 0.5  # default
+
+    def test_parse_judge_response_clamped(self):
+        score, _ = _parse_judge_response("SCORE: 1.5")
+        assert score == 1.0
+
+    def test_make_judge_metric_calls_system_llm(self):
+        system_llm = MagicMock(return_value=LLMResponse(
+            content="SCORE: 0.7\nFEEDBACK: Decent approach.",
+            tool_calls=None,
+            usage=TokenUsage(input_tokens=10, output_tokens=5),
+        ))
+        metric = make_judge_metric(system_llm)
+        example = SimpleNamespace(expected_behavior="[iter 1] bash(grep bug) → found")
+        prediction = SimpleNamespace(output="Search for the bug using grep")
+        result = metric(example, prediction)
+        assert system_llm.call_count == 1
+        # Result should have score and feedback
+        if hasattr(result, "score"):
+            assert result.score == 0.7
+        else:
+            assert result["score"] == 0.7
 
 
 # ===========================================================================
@@ -179,13 +205,13 @@ class TestConfigDatasetBuilder:
 
     def test_size_tracking(self):
         builder = ConfigDatasetBuilder()
-        builder.add_episode("task", "summary", 0.5)
+        builder.add_episode("task", "summary", 1.0)
         assert builder.size == 1
 
     def test_split_ratios(self):
         builder = ConfigDatasetBuilder()
         for i in range(20):
-            builder.add_episode(f"task_{i}", f"summary_{i}", float(i) / 20)
+            builder.add_episode(f"task_{i}", f"summary_{i}", 1.0)
         train, val, holdout = builder.build()
         assert len(train) == 10  # 50%
         assert len(val) == 5     # 25%
@@ -196,6 +222,24 @@ class TestConfigDatasetBuilder:
         builder.add_episode("task", "summary", 1.0)
         train, val, holdout = builder.build()
         assert len(train) == 1
+
+    def test_sliding_window_drops_oldest(self):
+        builder = ConfigDatasetBuilder(max_window=5)
+        for i in range(8):
+            builder.add_episode(f"task_{i}", f"trace_{i}", 1.0)
+        assert builder.size == 5
+        # Oldest 3 dropped, remaining are task_3 through task_7
+        train, val, holdout = builder.build()
+        all_examples = train + val + holdout
+        task_inputs = [e.task_input for e in all_examples]
+        assert "task_0" not in task_inputs
+        assert "task_7" in task_inputs
+
+    def test_sliding_window_default_is_20(self):
+        builder = ConfigDatasetBuilder()
+        for i in range(25):
+            builder.add_episode(f"task_{i}", f"trace_{i}", 1.0)
+        assert builder.size == 20
 
 
 # ===========================================================================
@@ -262,3 +306,23 @@ class TestGEPAConfigOptimizer:
         config = _make_config(StepConfig(id="s1", prompt="Do.", tools=["bash"]))
         result = opt.maybe_optimize(config)
         assert result is config  # unchanged
+
+    def test_condense_prompt(self):
+        """Condensation asks system_llm to shorten a prompt."""
+        condensed = "Find relevant files using grep."
+        system_llm = MagicMock(return_value=LLMResponse(
+            content=condensed,
+            tool_calls=None,
+            usage=TokenUsage(input_tokens=10, output_tokens=5),
+        ))
+        opt = GEPAConfigOptimizer(system_llm=system_llm)
+        result = opt._condense_prompt("A" * 3000, max_chars=2000)
+        assert result == condensed
+        assert system_llm.call_count == 1
+
+    def test_sliding_window_parameter(self):
+        """GEPAConfigOptimizer passes window_size to dataset builder."""
+        opt = GEPAConfigOptimizer(system_llm=_make_system_llm(), window_size=3)
+        for i in range(5):
+            opt.record_episode(f"task_{i}", f"trace_{i}", 1.0)
+        assert opt.dataset.size == 3

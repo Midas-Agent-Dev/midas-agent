@@ -6,9 +6,9 @@ the two features missing from the old reflective self-rewrite.
 
 Architecture:
   - StepPromptModule: wraps a step prompt as a DSPy-evolvable parameter
-  - config_fitness_metric: Pareto scoring (accuracy + brevity)
-  - ConfigDatasetBuilder: accumulates (trace, score) pairs across episodes
-  - GEPAConfigOptimizer: runs GEPA every N episodes on accumulated data
+  - LLM-as-judge metric: system_llm scores alignment with successful traces
+  - ConfigDatasetBuilder: sliding window of recent successful traces
+  - GEPAConfigOptimizer: runs GEPA every N episodes on windowed data
 """
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ import json
 import logging
 import math
 import os
+import re
 from types import SimpleNamespace
 from typing import Callable
 
@@ -86,63 +87,129 @@ class StepPromptModule(_BASE_MODULE):  # type: ignore[misc]
 
 
 # ===================================================================
-# Fitness metric
+# LLM-as-judge metric
 # ===================================================================
 
-# Max prompt length for brevity scoring (chars).  Prompts at or above
-# this length get a brevity score of 0.
-BREVITY_CEILING = 2000
+JUDGE_PROMPT_TEMPLATE = """\
+You are evaluating a coding agent's planned approach for a workflow step.
+
+The agent was given step instructions and produced this plan:
+<plan>
+{output}
+</plan>
+
+A successful agent's actual execution trace for a similar task:
+<trace>
+{expected_trace}
+</trace>
+
+Evaluate on two criteria:
+1. STRATEGY ALIGNMENT (0.0-1.0): Does the plan follow a similar strategy \
+to the successful trace? (searching relevant files, reading code before \
+editing, running tests, etc.)
+2. CONCISENESS: Is the plan overly verbose or appropriately concise?
+
+Respond in exactly this format:
+SCORE: <float between 0.0 and 1.0>
+FEEDBACK: <one paragraph explaining the score and what could improve>\
+"""
 
 
-def config_fitness_metric(example, prediction, trace=None, pred_name=None, pred_trace=None) -> dict:
-    """Multi-objective fitness: accuracy (word overlap) + brevity.
+def _parse_judge_response(text: str) -> tuple[float, str]:
+    """Parse SCORE: and FEEDBACK: from judge LLM response."""
+    score = 0.5  # default
+    feedback = text or "No feedback."
 
-    Returns ``{"scores": {"accuracy": float, "brevity": float}}``.
+    score_match = re.search(r"SCORE:\s*([\d.]+)", text or "")
+    if score_match:
+        try:
+            score = max(0.0, min(1.0, float(score_match.group(1))))
+        except ValueError:
+            pass
 
-    DSPy GEPA requires a 5-argument signature:
-    ``(gold, pred, trace, pred_name, pred_trace)``.
+    feedback_match = re.search(r"FEEDBACK:\s*(.+)", text or "", re.DOTALL)
+    if feedback_match:
+        feedback = feedback_match.group(1).strip()
 
-    - **accuracy**: overlap between predicted output and the expected
-      successful trace summary.  Floor of 0.3 for non-empty output
-      (the model tried something).
-    - **brevity**: linear penalty as prompt output grows toward
-      ``BREVITY_CEILING`` chars.  This is the key difference from the
-      old reflective mutation — it actively rewards shorter prompts.
+    return score, feedback
+
+
+def make_judge_metric(system_llm: Callable[[LLMRequest], LLMResponse]):
+    """Create an LLM-as-judge metric closure for GEPA.
+
+    Returns a metric function with the 5-argument GEPA signature that
+    uses system_llm to score how well the module's output aligns with
+    successful execution traces.
     """
-    output: str = prediction.output if hasattr(prediction, "output") else str(prediction)
-    expected: str = example.expected_behavior
 
-    # --- brevity ---
-    brevity = max(0.0, 1.0 - len(output) / BREVITY_CEILING)
+    def judge_metric(example, prediction, trace=None, pred_name=None, pred_trace=None):
+        output = prediction.output if hasattr(prediction, "output") else str(prediction)
+        expected_trace = example.expected_behavior
 
-    # --- accuracy ---
+        prompt = JUDGE_PROMPT_TEMPLATE.format(
+            output=output[:1000],
+            expected_trace=expected_trace[:1500],
+        )
+
+        try:
+            resp = system_llm(
+                LLMRequest(messages=[{"role": "user", "content": prompt}], model="default")
+            )
+            score, feedback = _parse_judge_response(resp.content or "")
+        except Exception as e:
+            logger.warning("Judge metric failed: %s", e)
+            score, feedback = 0.5, f"Judge error: {e}"
+
+        if HAS_DSPY:
+            return dspy.Prediction(score=score, feedback=feedback)
+        return {"score": score, "feedback": feedback}
+
+    return judge_metric
+
+
+# Legacy metric for tests that don't have a system_llm
+def config_fitness_metric(example, prediction, trace=None, pred_name=None, pred_trace=None):
+    """Simple word-overlap metric (fallback for tests without system_llm)."""
+    output = prediction.output if hasattr(prediction, "output") else str(prediction)
+    expected = example.expected_behavior
+
+    brevity = max(0.0, 1.0 - len(output) / 2000)
+
     if not output.strip():
-        return {"scores": {"accuracy": 0.0, "brevity": brevity}}
-
-    expected_words = set(expected.lower().split())
-    output_words = set(output.lower().split())
-
-    if not expected_words:
-        accuracy = 0.5
+        score = 0.0
     else:
-        overlap = len(expected_words & output_words) / len(expected_words)
-        accuracy = 0.3 + 0.7 * overlap
+        expected_words = set(expected.lower().split())
+        output_words = set(output.lower().split())
+        if not expected_words:
+            score = 0.5
+        else:
+            overlap = len(expected_words & output_words) / len(expected_words)
+            score = 0.3 + 0.7 * overlap
 
-    return {"scores": {"accuracy": accuracy, "brevity": brevity}}
+    combined = 0.7 * score + 0.3 * brevity
+    if HAS_DSPY:
+        return dspy.Prediction(score=combined, feedback=f"Word overlap score: {score:.2f}, brevity: {brevity:.2f}")
+    return {"score": combined, "feedback": f"Word overlap score: {score:.2f}, brevity: {brevity:.2f}"}
 
 
 # ===================================================================
-# Dataset builder
+# Dataset builder (sliding window)
 # ===================================================================
+
+# Default sliding window size
+DEFAULT_WINDOW_SIZE = 20
+
 
 class ConfigDatasetBuilder:
-    """Accumulates (trace summary, score) pairs across episodes.
+    """Sliding window of recent successful traces for GEPA.
 
-    Builds train / val / holdout splits (50/25/25) for GEPA evaluation.
+    Keeps the last ``max_window`` episodes.  Builds train / val / holdout
+    splits (50/25/25) from the window for GEPA evaluation.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, max_window: int = DEFAULT_WINDOW_SIZE) -> None:
         self._episodes: list[SimpleNamespace] = []
+        self._max_window = max_window
 
     @property
     def size(self) -> int:
@@ -154,12 +221,12 @@ class ConfigDatasetBuilder:
         action_summary: str,
         score: float,
     ) -> None:
-        """Record one episode's data.
+        """Record one successful episode's data.
 
         Args:
             task_input: the issue description
-            action_summary: compact trace summary of what the agent did
-            score: s_exec for this episode
+            action_summary: full execution trace (from format_trace)
+            score: s_exec for this episode (should be >= 1.0)
         """
         self._episodes.append(
             SimpleNamespace(
@@ -168,6 +235,9 @@ class ConfigDatasetBuilder:
                 score=score,
             )
         )
+        # Sliding window: drop oldest if over limit
+        if len(self._episodes) > self._max_window:
+            self._episodes.pop(0)
 
     def build(self) -> tuple[list, list, list]:
         """Return ``(train, val, holdout)`` with a 50/25/25 split."""
@@ -197,6 +267,17 @@ MIN_DATASET_SIZE = 5
 # Maximum allowed prompt size after optimization
 MAX_OPTIMIZED_PROMPT_CHARS = 2000
 
+CONDENSE_PROMPT_TEMPLATE = """\
+Condense this coding agent step prompt to under {max_chars} characters.
+Keep the core strategy and key instructions. Remove redundant advice,
+verbose explanations, and generic tips. Be direct and actionable.
+
+Original prompt:
+{prompt}
+
+Respond with ONLY the condensed prompt, no explanation.\
+"""
+
 
 class GEPAConfigOptimizer:
     """Runs GEPA prompt optimization on DAG step prompts.
@@ -204,11 +285,11 @@ class GEPAConfigOptimizer:
     Replaces the old ``ConfigMutator.reflective_self_rewrite()``.
 
     Flow:
-      1. Workspace calls ``record_episode()`` after each episode
+      1. Workspace calls ``record_episode()`` after each successful episode
       2. Workspace calls ``maybe_optimize()`` after each episode
       3. If enough episodes accumulated (>= interval), GEPA runs on
-         each step prompt using the accumulated dataset
-      4. Constraint gating: size limit + holdout regression check
+         each step prompt using the sliding window dataset
+      4. Constraint gating: size limit (with condensation) + holdout check
       5. Returns optimized config or original if gating rejects
     """
 
@@ -218,11 +299,12 @@ class GEPAConfigOptimizer:
         gepa_interval: int = DEFAULT_GEPA_INTERVAL,
         min_dataset_size: int = MIN_DATASET_SIZE,
         data_dir: str | None = None,
+        window_size: int = DEFAULT_WINDOW_SIZE,
     ) -> None:
         self._system_llm = system_llm
         self._gepa_interval = gepa_interval
         self._min_dataset_size = min_dataset_size
-        self._dataset = ConfigDatasetBuilder()
+        self._dataset = ConfigDatasetBuilder(max_window=window_size)
         self._episodes_since_last_optimization = 0
         self._data_dir = data_dir
         if data_dir:
@@ -281,8 +363,8 @@ class GEPAConfigOptimizer:
 
         For each step:
           1. Wrap prompt as StepPromptModule
-          2. Run GEPA with trainset + valset
-          3. Constraint gate: size check + holdout regression
+          2. Run GEPA with LLM-as-judge metric + trainset + valset
+          3. Constraint gate: size check (with condensation) + holdout
           4. Accept or keep original
 
         Returns a new WorkflowConfig with optimized prompts.
@@ -304,6 +386,9 @@ class GEPAConfigOptimizer:
         # Configure DSPy LM for GEPA's reflection calls
         system_lm = self._make_dspy_lm()
 
+        # Create LLM-as-judge metric
+        metric = make_judge_metric(self._system_llm)
+
         from midas_agent.workspace.config_evolution.config_schema import (
             ConfigMeta,
             StepConfig,
@@ -320,6 +405,7 @@ class GEPAConfigOptimizer:
                 val=val,
                 holdout=holdout,
                 system_lm=system_lm,
+                metric=metric,
             )
 
             if new_prompt != step.prompt:
@@ -368,6 +454,7 @@ class GEPAConfigOptimizer:
         val: list,
         holdout: list,
         system_lm,
+        metric,
     ) -> str:
         """Optimize a single step prompt using GEPA.
 
@@ -377,7 +464,7 @@ class GEPAConfigOptimizer:
 
         try:
             optimizer = dspy.GEPA(
-                metric=config_fitness_metric,
+                metric=metric,
                 reflection_lm=system_lm,
                 auto="light",  # 6 candidates
                 candidate_selection_strategy="pareto",
@@ -396,13 +483,19 @@ class GEPAConfigOptimizer:
 
         # --- Constraint gating ---
 
-        # 1. Size check
+        # 1. Size check — condense if too large
         if len(new_prompt) > MAX_OPTIMIZED_PROMPT_CHARS:
             logger.info(
-                "GEPA: step '%s' rejected — prompt too large (%d > %d chars)",
-                step_id, len(new_prompt), MAX_OPTIMIZED_PROMPT_CHARS,
+                "GEPA: step '%s' prompt too large (%d chars), condensing...",
+                step_id, len(new_prompt),
             )
-            return step_prompt
+            new_prompt = self._condense_prompt(new_prompt, MAX_OPTIMIZED_PROMPT_CHARS)
+            if len(new_prompt) > MAX_OPTIMIZED_PROMPT_CHARS:
+                logger.info(
+                    "GEPA: step '%s' rejected — condensation failed (%d chars)",
+                    step_id, len(new_prompt),
+                )
+                return step_prompt
 
         # 2. Non-empty check
         if not new_prompt.strip():
@@ -411,7 +504,7 @@ class GEPAConfigOptimizer:
 
         # 3. Holdout regression check
         if holdout and not self._passes_holdout_check(
-            module, optimized_module, holdout
+            module, optimized_module, holdout, metric
         ):
             logger.info(
                 "GEPA: step '%s' rejected — holdout regression", step_id
@@ -420,11 +513,36 @@ class GEPAConfigOptimizer:
 
         return new_prompt
 
+    def _condense_prompt(self, prompt: str, max_chars: int) -> str:
+        """Ask system_llm to condense a prompt that exceeds the size limit."""
+        condense_prompt = CONDENSE_PROMPT_TEMPLATE.format(
+            max_chars=max_chars,
+            prompt=prompt,
+        )
+        try:
+            resp = self._system_llm(
+                LLMRequest(
+                    messages=[{"role": "user", "content": condense_prompt}],
+                    model="default",
+                )
+            )
+            condensed = (resp.content or "").strip()
+            if condensed:
+                logger.info(
+                    "GEPA: condensed prompt from %d to %d chars",
+                    len(prompt), len(condensed),
+                )
+                return condensed
+        except Exception as e:
+            logger.warning("GEPA: condensation failed: %s", e)
+        return prompt  # fallback to original
+
     def _passes_holdout_check(
         self,
         original_module: StepPromptModule,
         optimized_module: StepPromptModule,
         holdout: list,
+        metric,
     ) -> bool:
         """Check that the optimized module doesn't regress on the holdout set.
 
@@ -436,10 +554,12 @@ class GEPAConfigOptimizer:
             for example in data:
                 try:
                     pred = mod.forward(task_input=example.task_input)
-                    result = config_fitness_metric(example, pred)
-                    scores = result.get("scores", {})
-                    # Combined score: weighted accuracy + brevity
-                    total += 0.7 * scores.get("accuracy", 0.0) + 0.3 * scores.get("brevity", 0.0)
+                    result = metric(example, pred)
+                    # Extract score from dspy.Prediction or dict
+                    if hasattr(result, "score"):
+                        total += result.score
+                    elif isinstance(result, dict):
+                        total += result.get("score", 0.0)
                     count += 1
                 except Exception:
                     continue
@@ -455,14 +575,7 @@ class GEPAConfigOptimizer:
         return optimized_score >= original_score
 
     def _make_dspy_lm(self):
-        """Create a DSPy LM backed by our system_llm.
-
-        Uses dspy.LM with a wrapper that routes calls through
-        system_llm.
-        """
-        # For GEPA's reflection calls, use a basic dspy.LM pointed at
-        # the same model.  We read the model name from the system_llm's
-        # resolver if available, otherwise default.
+        """Create a DSPy LM for GEPA's reflection calls."""
         try:
             return dspy.LM(model="openai/default")
         except Exception:
