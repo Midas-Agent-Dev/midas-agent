@@ -151,6 +151,9 @@ the fix step's changes.
 - Keep each prompt under 2000 characters
 - End each prompt with "Call task_done when complete."
 - Output the COMPLETE YAML with the same structure
+- IMPORTANT: Include in the fix and validate steps: "Do NOT modify test files. \
+Only change source code files to fix the issue. Test changes have already been \
+handled separately."
 
 ## Base DAG
 
