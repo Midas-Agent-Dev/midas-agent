@@ -128,7 +128,9 @@ class WorkspaceManager:
         )
         from midas_agent.workspace.config_evolution.config_creator import ConfigCreator
         from midas_agent.workspace.config_evolution.executor import DAGExecutor
-        from midas_agent.workspace.config_evolution.mutator import ConfigMutator
+        from midas_agent.workspace.config_evolution.prompt_optimizer import (
+            GEPAConfigOptimizer,
+        )
         from midas_agent.workspace.config_evolution.snapshot_store import (
             ConfigSnapshotStore,
         )
@@ -149,7 +151,7 @@ class WorkspaceManager:
             max_context_tokens=self._config.max_context_tokens,
             system_llm=self._system_llm_callback,
         )
-        mutator = ConfigMutator(system_llm=self._system_llm_callback)
+        prompt_optimizer = GEPAConfigOptimizer(system_llm=self._system_llm_callback)
         config_creator = ConfigCreator(system_llm=self._system_llm_callback)
         snapshot_store = ConfigSnapshotStore(store_dir="/tmp/midas_snapshots")
 
@@ -190,7 +192,7 @@ class WorkspaceManager:
             call_llm=call_llm,
             system_llm=self._system_llm_callback,
             dag_executor=dag_executor,
-            config_mutator=mutator,
+            prompt_optimizer=prompt_optimizer,
             config_creator=config_creator,
             snapshot_store=snapshot_store,
         )

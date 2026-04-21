@@ -1,20 +1,19 @@
-"""Config mutator — reproduction and reflective self-rewrite via SystemLLM.
+"""Config mutation utilities — validation and structural constraint gating.
 
-The mutation loop: LLM generates YAML → deterministic validator checks it →
-if invalid, feed errors back to LLM → retry until valid.  All calls go
-through SystemLLM (unmetered, system cost).
+The ConfigMutator class (reflective self-rewrite) has been replaced by
+GEPAConfigOptimizer in prompt_optimizer.py.  This module retains:
+
+  - validate_config(): deterministic YAML/DAG validation
+  - _validate_mutation(): structural constraint gate (same IDs, tools, inputs)
+  - _config_to_yaml(): serialise WorkflowConfig to YAML
 """
 from __future__ import annotations
 
-import json
 import logging
 from collections import deque
-from typing import Callable
 
 import yaml
 
-from midas_agent.llm.types import LLMRequest, LLMResponse
-from midas_agent.stdlib.react_agent import ActionRecord
 from midas_agent.workspace.config_evolution.config_schema import (
     ConfigMeta,
     StepConfig,
@@ -23,14 +22,14 @@ from midas_agent.workspace.config_evolution.config_schema import (
 
 logger = logging.getLogger(__name__)
 
-# Retry budget for the validate-fix loop
-MAX_VALIDATION_RETRIES = 3
-
 # Valid action names that can appear in step.tools
 VALID_TOOLS = {"bash", "str_replace_editor", "task_done"}
 
 # Prompt size limit per step
 MAX_STEP_PROMPT_CHARS = 2000
+
+# Maximum allowed growth ratio for a single prompt mutation (30%)
+MAX_PROMPT_GROWTH_RATIO = 0.3
 
 
 # ------------------------------------------------------------------
@@ -137,250 +136,58 @@ def validate_config(config: WorkflowConfig) -> list[str]:
 
 
 # ------------------------------------------------------------------
-# ConfigMutator
+# Structural constraint gate for mutations
 # ------------------------------------------------------------------
 
-class ConfigMutator:
-    def __init__(
-        self,
-        system_llm: Callable[[LLMRequest], LLMResponse],
-    ) -> None:
-        self._system_llm = system_llm
+def _validate_mutation(
+    original: WorkflowConfig,
+    mutated: WorkflowConfig,
+) -> bool:
+    """Check that a mutation preserves DAG structure and satisfies constraints.
 
-    # ------------------------------------------------------------------
-    # Reflective self-rewrite
-    # ------------------------------------------------------------------
+    A valid mutation may ONLY change the ``prompt`` field of each step.
+    Step IDs, tools, inputs, and step count must remain identical.
 
-    def reflective_self_rewrite(
-        self,
-        config: WorkflowConfig,
-        action_history: list[ActionRecord],
-        score: float,
-    ) -> WorkflowConfig:
-        """Improve step prompts based on real execution traces.
+    Additional constraints:
+      - Prompts must be non-empty
+      - Prompts must not exceed MAX_STEP_PROMPT_CHARS
+      - Individual prompt growth must not exceed MAX_PROMPT_GROWTH_RATIO (30%)
 
-        Two-pass approach:
-          1. Trace → abstract experience summary
-          2. Config + summary + score → improved config (with validate-retry loop)
+    Returns True if the mutation is valid, False otherwise.
+    """
+    # Same number of steps
+    if len(original.steps) != len(mutated.steps):
+        return False
 
-        Falls back to the original config if all retries fail.
-        """
-        from midas_agent.prompts import (
-            CONFIG_CREATION_SUMMARIZE_PROMPT,
-            REFLECTIVE_MUTATION_PROMPT,
-        )
-        from midas_agent.workspace.config_evolution.config_creator import (
-            format_trace,
-            _extract_yaml,
-            _parse_config_yaml,
-            _tool_usage_summary,
-        )
+    for old_step, new_step in zip(original.steps, mutated.steps):
+        # Same step ID
+        if old_step.id != new_step.id:
+            return False
 
-        if not action_history:
-            return config
+        # Same tools
+        if old_step.tools != new_step.tools:
+            return False
 
-        # -- Pass 1: trace → abstract summary --
-        formatted = format_trace(action_history)
-        tool_summary = _tool_usage_summary(action_history)
+        # Same inputs (DAG structure preserved)
+        if old_step.inputs != new_step.inputs:
+            return False
 
-        summarize_prompt = CONFIG_CREATION_SUMMARIZE_PROMPT.format(
-            iteration_count=len(action_history),
-            score=score,
-            formatted_trace=formatted,
-            tool_usage_summary=tool_summary,
-        )
+        # Non-empty prompt
+        if not new_step.prompt.strip():
+            return False
 
-        try:
-            resp = self._system_llm(
-                LLMRequest(messages=[{"role": "user", "content": summarize_prompt}],
-                           model="default"),
-            )
-        except Exception as e:
-            logger.warning("Reflective mutation pass 1 failed: %s", e)
-            return config
+        # Prompt size limit
+        if len(new_step.prompt) > MAX_STEP_PROMPT_CHARS:
+            return False
 
-        summary = (resp.content or "").strip()
-        if not summary:
-            logger.warning("Reflective mutation pass 1 returned empty summary")
-            return config
+        # Growth cap: prevent inflation of already-long prompts.
+        # Only enforced when original prompt is ≥ 100 chars — short
+        # prompts naturally have high percentage growth.
+        old_len = len(old_step.prompt)
+        new_len = len(new_step.prompt)
+        if old_len >= 100:
+            growth = (new_len - old_len) / old_len
+            if growth > MAX_PROMPT_GROWTH_RATIO:
+                return False
 
-        # -- Pass 2: config + summary + score → improved config --
-        config_yaml = _config_to_yaml(config)
-
-        mutate_prompt = REFLECTIVE_MUTATION_PROMPT.format(
-            config_yaml=config_yaml,
-            summary=summary,
-            score=score,
-        )
-
-        # Build conversation for the validate-retry loop
-        messages = [{"role": "user", "content": mutate_prompt}]
-
-        for attempt in range(1 + MAX_VALIDATION_RETRIES):
-            try:
-                resp = self._system_llm(
-                    LLMRequest(messages=messages, model="default"),
-                )
-            except Exception as e:
-                logger.warning("Reflective mutation pass 2 failed: %s", e)
-                return config
-
-            raw_yaml = _extract_yaml(resp.content or "")
-            if not raw_yaml:
-                logger.warning("Reflective mutation: empty response (attempt %d)", attempt + 1)
-                return config
-
-            new_config = _parse_config_yaml(raw_yaml)
-            if new_config is None:
-                # YAML didn't parse — ask LLM to fix
-                messages.append({"role": "assistant", "content": resp.content or ""})
-                messages.append({"role": "user", "content": "That YAML failed to parse. Please output valid YAML."})
-                continue
-
-            # Deterministic validation
-            validation_errors = validate_config(new_config)
-            if not validation_errors:
-                logger.info(
-                    "Reflective mutation accepted for '%s' (attempt %d)",
-                    config.meta.name, attempt + 1,
-                )
-                return new_config
-
-            # Feed errors back to the LLM for retry
-            error_msg = (
-                "The configuration has validation errors:\n"
-                + "\n".join(f"- {e}" for e in validation_errors)
-                + "\n\nPlease fix these errors and output the corrected YAML."
-            )
-            messages.append({"role": "assistant", "content": resp.content or ""})
-            messages.append({"role": "user", "content": error_msg})
-            logger.info(
-                "Reflective mutation: %d validation errors, retrying (attempt %d/%d)",
-                len(validation_errors), attempt + 1, 1 + MAX_VALIDATION_RETRIES,
-            )
-
-        logger.warning("Reflective mutation: exhausted retries, keeping original config")
-        return config
-
-    # ------------------------------------------------------------------
-    # Legacy reproduce (for eviction path — kept for backward compat)
-    # ------------------------------------------------------------------
-
-    def reproduce(
-        self,
-        base_config: WorkflowConfig,
-        summaries: list[str],
-    ) -> dict:
-        """Create a new config variant based on the base config and episode summaries."""
-        steps_repr = []
-        for step in base_config.steps:
-            steps_repr.append({
-                "id": step.id,
-                "prompt": step.prompt,
-                "tools": step.tools,
-                "inputs": step.inputs,
-            })
-
-        prompt = (
-            "You are a configuration evolution engine. Given the base workflow "
-            "configuration and summaries of past episodes, create a new variant "
-            "configuration that improves upon the base.\n\n"
-            f"Base config name: {base_config.meta.name}\n"
-            f"Base config description: {base_config.meta.description}\n"
-            f"Steps: {json.dumps(steps_repr)}\n\n"
-            f"Episode summaries:\n"
-            + "\n".join(f"- {s}" for s in summaries)
-            + "\n\nRespond with a JSON object representing the new configuration."
-        )
-
-        request = LLMRequest(
-            messages=[{"role": "user", "content": prompt}],
-            model="default",
-        )
-        response = self._system_llm(request)
-
-        try:
-            result = json.loads(response.content or "{}")
-            if isinstance(result, dict):
-                return result
-        except (json.JSONDecodeError, TypeError):
-            pass
-
-        return {
-            "meta": {
-                "name": base_config.meta.name + "_variant",
-                "description": base_config.meta.description,
-            },
-            "steps": steps_repr,
-        }
-
-    def self_rewrite(
-        self,
-        config: WorkflowConfig,
-        summary: str,
-    ) -> WorkflowConfig:
-        """Legacy self-rewrite (plain LLM, no trace feedback).
-
-        Kept as fallback when no action_history is available.
-        """
-        steps_repr = []
-        for step in config.steps:
-            steps_repr.append({
-                "id": step.id,
-                "prompt": step.prompt,
-                "tools": step.tools,
-                "inputs": step.inputs,
-            })
-
-        prompt = (
-            "You are a configuration evolution engine. Given the current workflow "
-            "configuration and an episode summary, rewrite the configuration to "
-            "improve it.\n\n"
-            f"Current config name: {config.meta.name}\n"
-            f"Current config description: {config.meta.description}\n"
-            f"Steps: {json.dumps(steps_repr)}\n\n"
-            f"Episode summary: {summary}\n\n"
-            "Respond with a JSON object representing the rewritten configuration."
-        )
-
-        request = LLMRequest(
-            messages=[{"role": "user", "content": prompt}],
-            model="default",
-        )
-        response = self._system_llm(request)
-
-        try:
-            data = json.loads(response.content or "{}")
-            if isinstance(data, dict) and "steps" in data:
-                meta_data = data.get("meta", {})
-                new_meta = ConfigMeta(
-                    name=meta_data.get("name", config.meta.name),
-                    description=meta_data.get("description", config.meta.description),
-                )
-                new_steps = []
-                for s in data["steps"]:
-                    new_steps.append(StepConfig(
-                        id=s.get("id", "step"),
-                        prompt=s.get("prompt", ""),
-                        tools=s.get("tools", []),
-                        inputs=s.get("inputs", []),
-                    ))
-                return WorkflowConfig(meta=new_meta, steps=new_steps)
-        except (json.JSONDecodeError, TypeError, KeyError):
-            pass
-
-        # Fallback: return a copy of the config with an updated description.
-        new_meta = ConfigMeta(
-            name=config.meta.name,
-            description=config.meta.description + " (rewritten)",
-        )
-        new_steps = [
-            StepConfig(
-                id=step.id,
-                prompt=step.prompt,
-                tools=list(step.tools),
-                inputs=list(step.inputs),
-            )
-            for step in config.steps
-        ]
-        return WorkflowConfig(meta=new_meta, steps=new_steps)
+    return True

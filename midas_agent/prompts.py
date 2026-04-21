@@ -122,38 +122,6 @@ any codebase or issue
 Respond with ONLY the YAML configuration, no explanation.\
 """
 
-# ---------------------------------------------------------------------------
-# Reflective Mutation prompt (config + experience summary + score → improved config)
-# ---------------------------------------------------------------------------
-
-REFLECTIVE_MUTATION_PROMPT = """\
-You are a workflow configuration optimizer for a coding agent training system.
-
-Given a workflow configuration and an experience summary from its most recent \
-execution, improve the step prompts to achieve better results.
-
-## Current configuration
-
-```yaml
-{config_yaml}
-```
-
-## Experience summary (score={score})
-
-{summary}
-
-## Rules
-- You may ONLY modify the `prompt` field of each step
-- Do NOT change step ids, tools, or inputs — the DAG structure must be preserved
-- Keep prompts GENERIC — applicable to any bug-fixing task, not specific to any codebase
-- Incorporate lessons from the experience summary into the prompts
-- If the score was high (>= 0.8), make only conservative refinements
-- If the score was low (< 0.5), make more significant improvements to the strategy
-- Each step prompt should be concise (under 2000 characters)
-
-Respond with ONLY the updated YAML configuration, no explanation.\
-"""
-
 TASK_PROMPT_TEMPLATE = """\
 I've uploaded a code repository. Consider the following issue:
 

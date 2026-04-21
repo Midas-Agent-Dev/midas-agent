@@ -13,7 +13,8 @@ from midas_agent.workspace.base import Workspace
 from midas_agent.workspace.config_evolution.config_creator import ConfigCreator
 from midas_agent.workspace.config_evolution.config_schema import WorkflowConfig
 from midas_agent.workspace.config_evolution.executor import DAGExecutor, ExecutionResult
-from midas_agent.workspace.config_evolution.mutator import ConfigMutator, _config_to_yaml
+from midas_agent.workspace.config_evolution.mutator import _config_to_yaml
+from midas_agent.workspace.config_evolution.prompt_optimizer import GEPAConfigOptimizer
 from midas_agent.workspace.config_evolution.snapshot_store import ConfigSnapshot, ConfigSnapshotStore
 
 logger = logging.getLogger(__name__)
@@ -30,7 +31,7 @@ class ConfigEvolutionWorkspace(Workspace):
         call_llm: Callable[[LLMRequest], LLMResponse],
         system_llm: Callable[[LLMRequest], LLMResponse],
         dag_executor: DAGExecutor,
-        config_mutator: ConfigMutator,
+        prompt_optimizer: GEPAConfigOptimizer,
         config_creator: ConfigCreator,
         snapshot_store: ConfigSnapshotStore,
     ) -> None:
@@ -39,11 +40,12 @@ class ConfigEvolutionWorkspace(Workspace):
         self._call_llm = call_llm
         self._system_llm = system_llm
         self._dag_executor = dag_executor
-        self._config_mutator = config_mutator
+        self._prompt_optimizer = prompt_optimizer
         self._config_creator = config_creator
         self._snapshot_store = snapshot_store
         self._budget = 0
         self._last_result: ExecutionResult | None = None
+        self._last_issue: Issue | None = None
         self._episode_count = 0
         self._io = None  # Set by training.py for Docker execution mode
 
@@ -69,6 +71,7 @@ class ConfigEvolutionWorkspace(Workspace):
 
     def execute(self, issue: Issue) -> None:
         self.calls.append(("execute", {"issue_id": issue.issue_id}))
+        self._last_issue = issue
         if self._io is not None:
             self._dag_executor.set_io(self._io)
             # Docker IO: use the container workdir, not the host path
@@ -160,27 +163,43 @@ class ConfigEvolutionWorkspace(Workspace):
                 )
                 return None  # survived, config upgraded
 
+        # -- Record episode data for GEPA --
+        has_trace = (
+            self._last_result is not None
+            and self._last_result.action_history
+        )
+        if has_trace and self._last_issue is not None:
+            from midas_agent.workspace.config_evolution.config_creator import (
+                format_trace,
+                _tool_usage_summary,
+            )
+            action_summary = (
+                f"score={my_score} | "
+                f"tools: {_tool_usage_summary(self._last_result.action_history)} | "
+                f"steps: {len(self._last_result.action_history)}"
+            )
+            self._prompt_optimizer.record_episode(
+                task_input=self._last_issue.description,
+                action_summary=action_summary,
+                score=my_score,
+            )
+
         # -- Normal post-episode flow --
         if self.workspace_id in evicted_ids:
             # Evicted: nothing to do.  The scheduler will replace this
             # workspace with a new one seeded from the best-η config.
             return None
         else:
-            # Survived: reflective self-rewrite using real trace data.
-            # Skip mutation for the default single-step config — it awaits
-            # config creation on first success, not incremental mutation.
-            has_trace = (
-                self._last_result is not None
-                and self._last_result.action_history
-            )
-            if not self._is_default_config() and has_trace:
-                new_config = self._config_mutator.reflective_self_rewrite(
-                    config=self._workflow_config,
-                    action_history=self._last_result.action_history,
-                    score=my_score,
+            # Survived: GEPA optimization (runs every N episodes when
+            # enough data has accumulated).  Skip for the default
+            # single-step config — it awaits config creation on first
+            # success, not incremental mutation.
+            if not self._is_default_config():
+                new_config = self._prompt_optimizer.maybe_optimize(
+                    self._workflow_config,
                 )
                 self._workflow_config = new_config
-            # else: keep current config as-is (default config or no trace)
+            # else: keep current config as-is (default config)
 
         # -- Save snapshot for export --
         self._episode_count += 1

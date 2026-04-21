@@ -12,7 +12,7 @@ from midas_agent.workspace.config_evolution.config_schema import (
 )
 from midas_agent.workspace.config_evolution.config_creator import ConfigCreator
 from midas_agent.workspace.config_evolution.executor import DAGExecutor, ExecutionResult
-from midas_agent.workspace.config_evolution.mutator import ConfigMutator
+from midas_agent.workspace.config_evolution.prompt_optimizer import GEPAConfigOptimizer
 from midas_agent.workspace.config_evolution.snapshot_store import ConfigSnapshotStore
 from midas_agent.evaluation.module import EvalResult
 from midas_agent.types import Issue
@@ -41,13 +41,17 @@ class TestConfigEvolutionWorkspace:
 
     def _make_workspace(self) -> ConfigEvolutionWorkspace:
         """Create a ConfigEvolutionWorkspace with mocked dependencies."""
+        wc = self._make_workflow_config()
+        optimizer = MagicMock(spec=GEPAConfigOptimizer)
+        # maybe_optimize must return a real WorkflowConfig, not a Mock
+        optimizer.maybe_optimize.return_value = wc
         return ConfigEvolutionWorkspace(
             workspace_id="ws-1",
-            workflow_config=self._make_workflow_config(),
+            workflow_config=wc,
             call_llm=self._make_call_llm(),
             system_llm=self._make_call_llm(),
             dag_executor=MagicMock(spec=DAGExecutor),
-            config_mutator=MagicMock(spec=ConfigMutator),
+            prompt_optimizer=optimizer,
             config_creator=MagicMock(spec=ConfigCreator),
             snapshot_store=MagicMock(spec=ConfigSnapshotStore),
         )
@@ -70,6 +74,7 @@ class TestConfigEvolutionWorkspace:
 
     def test_execute_delegates_to_dag_executor(self):
         """execute() delegates to the DAGExecutor to run the workflow."""
+        wc = self._make_workflow_config()
         dag_executor = MagicMock(spec=DAGExecutor)
         dag_executor.execute.return_value = ExecutionResult(
             step_outputs={"s1": "done"},
@@ -77,13 +82,15 @@ class TestConfigEvolutionWorkspace:
             aborted=False,
             abort_step=None,
         )
+        optimizer = MagicMock(spec=GEPAConfigOptimizer)
+        optimizer.maybe_optimize.return_value = wc
         ws = ConfigEvolutionWorkspace(
             workspace_id="ws-1",
-            workflow_config=self._make_workflow_config(),
+            workflow_config=wc,
             call_llm=self._make_call_llm(),
             system_llm=self._make_call_llm(),
             dag_executor=dag_executor,
-            config_mutator=MagicMock(spec=ConfigMutator),
+            prompt_optimizer=optimizer,
             config_creator=MagicMock(spec=ConfigCreator),
             snapshot_store=MagicMock(spec=ConfigSnapshotStore),
         )
@@ -108,7 +115,7 @@ class TestConfigEvolutionWorkspace:
         """An evicted workspace returns None from post_episode().
 
         Evicted workspaces no longer produce their own replacement config.
-        The scheduler seeds replacements with the best-η config.
+        The scheduler seeds replacements with the best-eta config.
         """
         ws = self._make_workspace()
 
@@ -121,7 +128,7 @@ class TestConfigEvolutionWorkspace:
         """A surviving workspace returns None from post_episode().
 
         When workspace_id is not in evicted_ids, post_episode triggers
-        ConfigMutator.self_rewrite() and returns None.
+        GEPAConfigOptimizer.maybe_optimize() and returns None.
         """
         ws = self._make_workspace()
 
