@@ -208,19 +208,18 @@ class Scheduler:
         return set(self._all_evicted_ever)
 
     def replace_evicted(self, new_configs: list[dict] | None = None) -> None:
-        """Replace previously evicted workspaces with new ones.
+        """Replace workspaces evicted by SelectionEngine (bottom-η).
 
-        Each replacement is seeded with the best-η workspace's config.
-        The *new_configs* parameter is accepted for backward compatibility
-        but ignored — the scheduler now sources the config itself.
+        Mid-episode budget exhaustion is NOT eviction — the workspace
+        still participates in evaluation and post-episode mutation.
+        Only SelectionEngine evictions trigger replacement.
         """
-        all_evicted = self.get_all_evictions()
-        if not all_evicted:
+        if not self._evicted_ids:
             return
 
         best_config = self._get_best_config()
 
-        for i, old_id in enumerate(all_evicted):
+        for i, old_id in enumerate(self._evicted_ids):
             new_id = f"ws-{self._episode_count}-new-{i}"
             self._workspace_manager.replace(old_id, new_id, best_config)
 
