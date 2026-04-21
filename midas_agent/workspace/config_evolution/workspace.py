@@ -10,7 +10,7 @@ from typing import Callable
 from midas_agent.llm.types import LLMRequest, LLMResponse
 from midas_agent.types import Issue
 from midas_agent.workspace.base import Workspace
-from midas_agent.workspace.config_evolution.config_creator import ConfigCreator
+from midas_agent.workspace.config_evolution.config_creator import ConfigCreator, ConfigMerger
 from midas_agent.workspace.config_evolution.config_schema import WorkflowConfig
 from midas_agent.workspace.config_evolution.executor import DAGExecutor, ExecutionResult
 from midas_agent.workspace.config_evolution.mutator import _config_to_yaml
@@ -33,6 +33,7 @@ class ConfigEvolutionWorkspace(Workspace):
         dag_executor: DAGExecutor,
         prompt_optimizer: GEPAConfigOptimizer,
         config_creator: ConfigCreator,
+        config_merger: ConfigMerger,
         snapshot_store: ConfigSnapshotStore,
     ) -> None:
         super().__init__(workspace_id, call_llm, system_llm)
@@ -42,6 +43,7 @@ class ConfigEvolutionWorkspace(Workspace):
         self._dag_executor = dag_executor
         self._prompt_optimizer = prompt_optimizer
         self._config_creator = config_creator
+        self._config_merger = config_merger
         self._snapshot_store = snapshot_store
         self._budget = 0
         self._last_result: ExecutionResult | None = None
@@ -78,8 +80,17 @@ class ConfigEvolutionWorkspace(Workspace):
             self._dag_executor.set_work_dir(self._io._workdir)
         elif self.work_dir:
             self._dag_executor.set_work_dir(self.work_dir)
+
+        # Merge issue into config for multi-step DAGs.
+        # The base config has generic prompts; the merged config has
+        # issue-specific context embedded in each step prompt.
+        if not self._is_default_config():
+            exec_config = self._config_merger.merge(self._workflow_config, issue)
+        else:
+            exec_config = self._workflow_config
+
         self._last_result = self._dag_executor.execute(
-            self._workflow_config, issue, self._call_llm,
+            exec_config, issue, self._call_llm,
             balance_provider=lambda: self._budget,
         )
 

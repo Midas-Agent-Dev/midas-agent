@@ -127,7 +127,7 @@ class WorkspaceManager:
             StepConfig,
             WorkflowConfig,
         )
-        from midas_agent.workspace.config_evolution.config_creator import ConfigCreator
+        from midas_agent.workspace.config_evolution.config_creator import ConfigCreator, ConfigMerger
         from midas_agent.workspace.config_evolution.executor import DAGExecutor
         from midas_agent.workspace.config_evolution.prompt_optimizer import (
             GEPAConfigOptimizer,
@@ -157,6 +157,7 @@ class WorkspaceManager:
             data_dir=os.path.join(self._train_dir, "data"),
         )
         config_creator = ConfigCreator(system_llm=self._system_llm_callback)
+        config_merger = ConfigMerger(system_llm=self._system_llm_callback)
         snapshot_store = ConfigSnapshotStore(
             store_dir=os.path.join(self._train_dir, "log", "snapshots"),
         )
@@ -200,6 +201,7 @@ class WorkspaceManager:
             dag_executor=dag_executor,
             prompt_optimizer=prompt_optimizer,
             config_creator=config_creator,
+            config_merger=config_merger,
             snapshot_store=snapshot_store,
         )
 

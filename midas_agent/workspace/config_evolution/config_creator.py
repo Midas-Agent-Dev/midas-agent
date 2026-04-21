@@ -1,9 +1,8 @@
-"""Config creator — generate workflow configs from successful execution traces.
+"""Config creator and merger for Configuration Evolution workflows.
 
-Two-pass approach:
-  1. Summarise the raw trace into an abstract experience summary (no
-     issue-specific details).
-  2. Generate a YAML workflow config from the abstract summary.
+ConfigCreator: two-pass generation (trace → summary → YAML config).
+ConfigMerger: merges a base DAG with an issue (rewrites step prompts
+to embed issue context, preventing agent overscoping).
 """
 from __future__ import annotations
 
@@ -16,6 +15,7 @@ import yaml
 
 from midas_agent.llm.types import LLMRequest, LLMResponse
 from midas_agent.stdlib.react_agent import ActionRecord
+from midas_agent.types import Issue
 from midas_agent.workspace.config_evolution.config_schema import (
     ConfigMeta,
     StepConfig,
@@ -213,3 +213,128 @@ class ConfigCreator:
 
         logger.warning("Config creation: exhausted retries")
         return None
+
+
+# ------------------------------------------------------------------
+# ConfigMerger
+# ------------------------------------------------------------------
+
+MAX_MERGE_RETRIES = 3
+
+
+class ConfigMerger:
+    """Merge a base DAG with an issue by embedding issue context into step prompts.
+
+    The base DAG has generic step prompts (e.g., "Search the codebase for
+    relevant files").  The merger rewrites each step prompt to include the
+    relevant parts of the issue, so the agent doesn't receive the full issue
+    as a separate message.
+
+    This prevents overscoping: the localize step only knows the symptoms,
+    not the reproduction code or expected fix.
+    """
+
+    def __init__(
+        self,
+        system_llm: Callable[[LLMRequest], LLMResponse],
+    ) -> None:
+        self._system_llm = system_llm
+
+    def merge(
+        self,
+        base_config: WorkflowConfig,
+        issue: Issue,
+    ) -> WorkflowConfig:
+        """Merge issue context into base DAG step prompts.
+
+        Returns the merged config, or the original base config if
+        merging fails after retries.
+        """
+        from midas_agent.prompts import CONFIG_MERGE_PROMPT
+        from midas_agent.workspace.config_evolution.mutator import (
+            _config_to_yaml,
+            validate_config,
+        )
+
+        base_yaml = _config_to_yaml(base_config)
+        merge_prompt = CONFIG_MERGE_PROMPT.format(
+            base_config_yaml=base_yaml,
+            issue_description=issue.description,
+        )
+
+        messages = [{"role": "user", "content": merge_prompt}]
+
+        for attempt in range(1 + MAX_MERGE_RETRIES):
+            try:
+                resp = self._system_llm(
+                    LLMRequest(messages=messages, model="default"),
+                )
+            except Exception as e:
+                logger.warning("Config merge failed: %s", e)
+                return base_config
+
+            raw_yaml = _extract_yaml(resp.content or "")
+            if not raw_yaml:
+                logger.warning("Config merge returned empty response")
+                return base_config
+
+            merged = _parse_config_yaml(raw_yaml)
+            if merged is None:
+                messages.append({"role": "assistant", "content": resp.content or ""})
+                messages.append({"role": "user", "content": "That YAML failed to parse. Please output valid YAML."})
+                continue
+
+            # Validate basic config structure
+            validation_errors = validate_config(merged)
+            if validation_errors:
+                error_msg = (
+                    "The configuration has validation errors:\n"
+                    + "\n".join(f"- {e}" for e in validation_errors)
+                    + "\n\nPlease fix these errors and output the corrected YAML."
+                )
+                messages.append({"role": "assistant", "content": resp.content or ""})
+                messages.append({"role": "user", "content": error_msg})
+                logger.info(
+                    "Config merge: %d errors, retrying (attempt %d/%d)",
+                    len(validation_errors), attempt + 1, 1 + MAX_MERGE_RETRIES,
+                )
+                continue
+
+            # Structural check: same step IDs, tools, inputs
+            if not self._structure_preserved(base_config, merged):
+                messages.append({"role": "assistant", "content": resp.content or ""})
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "The merged config changed the DAG structure (step IDs, tools, "
+                        "or inputs). You must keep these EXACTLY as the base config. "
+                        "Only rewrite the prompt fields. Please try again."
+                    ),
+                })
+                logger.info(
+                    "Config merge: structure changed, retrying (attempt %d/%d)",
+                    attempt + 1, 1 + MAX_MERGE_RETRIES,
+                )
+                continue
+
+            logger.info(
+                "Config merged for issue '%s' (%d steps, attempt %d)",
+                issue.issue_id, len(merged.steps), attempt + 1,
+            )
+            return merged
+
+        logger.warning("Config merge: exhausted retries, using base config")
+        return base_config
+
+    @staticmethod
+    def _structure_preserved(
+        base: WorkflowConfig,
+        merged: WorkflowConfig,
+    ) -> bool:
+        """Check that merged config has same structure as base."""
+        if len(base.steps) != len(merged.steps):
+            return False
+        for b, m in zip(base.steps, merged.steps):
+            if b.id != m.id or b.tools != m.tools or b.inputs != m.inputs:
+                return False
+        return True

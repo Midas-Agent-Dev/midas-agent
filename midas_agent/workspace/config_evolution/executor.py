@@ -154,14 +154,14 @@ class DAGExecutor:
             system_prompt="", actions=actions, call_llm=call_llm,
         )._build_tools()
 
-        # Build initial messages: DAG system prompt + issue + first step guidance.
+        # Build initial messages: DAG system prompt + first step prompt.
+        # The issue context is already embedded in the step prompts by
+        # ConfigMerger — no separate issue injection needed.
         from midas_agent.prompts import DAG_SYSTEM_PROMPT
 
         messages: list[dict] = [
             {"role": "system", "content": DAG_SYSTEM_PROMPT},
             {"role": "user", "content": (
-                f"Here is the issue to fix:\n\n{issue.description}\n\n"
-                f"---\n\n"
                 f"**Current phase: {first_step.id}**\n\n{first_step.prompt}"
             )},
         ]

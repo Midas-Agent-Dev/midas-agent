@@ -39,9 +39,10 @@ for specific sections.
 """
 
 DAG_SYSTEM_PROMPT = """\
-You are a coding agent. You are given a code repository and a GitHub issue. \
-I will guide you to fix it step by step. Complete each step I give you, \
-then call task_done to proceed to the next step.\
+You are a coding agent working on a code repository. \
+I will guide you step by step. Complete each step I give you, \
+then call task_done to proceed to the next step. \
+Focus ONLY on what the current step asks — do not skip ahead.\
 """
 
 # ---------------------------------------------------------------------------
@@ -120,6 +121,48 @@ any codebase or issue
 - Main lesson: confirm root cause BEFORE editing code
 
 Respond with ONLY the YAML configuration, no explanation.\
+"""
+
+# ---------------------------------------------------------------------------
+# Config Merge prompt (base DAG + issue → issue-specific DAG)
+# ---------------------------------------------------------------------------
+
+CONFIG_MERGE_PROMPT = """\
+You are a workflow configuration merger for a coding agent system.
+
+Given a BASE workflow DAG and a GitHub issue, rewrite ONLY the prompt field \
+of each step to embed the relevant parts of the issue. Keep everything else \
+(meta, step IDs, tools, inputs) EXACTLY as-is.
+
+## Rules for splitting the issue across steps
+- **localize**: Include the issue title and key symptoms (error messages, \
+unexpected behavior). The agent needs to know WHAT to search for. Do NOT \
+include reproduction code or fix hints.
+- **investigate**: Include the reproduction code so the agent can observe the \
+bug. Reference the localize step's output for file locations.
+- **fix**: Include the expected correct behavior. Reference the investigate \
+step's findings for root cause. Do NOT include reproduction code.
+- **validate**: Include test expectations and verification steps. Reference \
+the fix step's changes.
+
+## Constraints
+- Each step prompt must be self-contained — the agent sees NOTHING else
+- Do NOT repeat the full issue in every step
+- Keep each prompt under 2000 characters
+- End each prompt with "Call task_done when complete."
+- Output the COMPLETE YAML with the same structure
+
+## Base DAG
+
+```yaml
+{base_config_yaml}
+```
+
+## Issue
+
+{issue_description}
+
+Respond with ONLY the YAML inside ```yaml fences.\
 """
 
 TASK_PROMPT_TEMPLATE = """\

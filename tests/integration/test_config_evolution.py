@@ -23,6 +23,7 @@ from midas_agent.stdlib.react_agent import ActionRecord, AgentResult, ReactAgent
 from midas_agent.types import Issue
 from midas_agent.workspace.config_evolution.config_creator import (
     ConfigCreator,
+    ConfigMerger,
     format_trace,
     _extract_yaml,
     _parse_config_yaml,
@@ -121,6 +122,7 @@ def _make_workspace(
             data_dir=os.path.join(temp_dir, "data"),
         ),
         config_creator=ConfigCreator(system_llm=system_llm),
+        config_merger=ConfigMerger(system_llm=system_llm),
         snapshot_store=ConfigSnapshotStore(store_dir=os.path.join(temp_dir, "snapshots")),
     )
 
