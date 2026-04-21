@@ -151,14 +151,19 @@ def make_judge_metric(system_llm: Callable[[LLMRequest], LLMResponse]):
             expected_trace=expected_trace[:1500],
         )
 
-        try:
+        if HAS_DSPY and dspy.settings.lm is not None:
+            resp = dspy.settings.lm(prompt)
+            if isinstance(resp, list) and resp:
+                item = resp[0]
+                raw = item.get("text", str(item)) if isinstance(item, dict) else str(item)
+            else:
+                raw = str(resp)
+            score, feedback = _parse_judge_response(raw)
+        else:
             resp = system_llm(
                 LLMRequest(messages=[{"role": "user", "content": prompt}], model="default")
             )
             score, feedback = _parse_judge_response(resp.content or "")
-        except Exception as e:
-            logger.warning("Judge metric failed: %s", e)
-            score, feedback = 0.5, f"Judge error: {e}"
 
         if HAS_DSPY:
             return dspy.Prediction(score=score, feedback=feedback)
@@ -478,8 +483,9 @@ class GEPAConfigOptimizer:
             optimizer = dspy.GEPA(
                 metric=metric,
                 reflection_lm=system_lm,
-                auto="light",  # 6 candidates
+                max_metric_calls=60,
                 candidate_selection_strategy="pareto",
+                num_threads=16,
             )
             optimized_module = optimizer.compile(
                 module,
@@ -587,9 +593,22 @@ class GEPAConfigOptimizer:
         return optimized_score >= original_score
 
     def _make_dspy_lm(self):
-        """Create a DSPy LM for GEPA's reflection calls."""
+        """Create a DSPy LM for GEPA's reflection calls.
+
+        Reads model/api_key from the same sources as the rest of Midas
+        (env vars → .midas/config.yaml).
+        """
         try:
-            return dspy.LM(model="openai/default")
-        except Exception:
-            logger.warning("Could not create DSPy LM, GEPA may not work")
+            from midas_agent.resolver import resolve_llm_config
+            llm_config = resolve_llm_config()
+            kwargs = {"model": llm_config.model}
+            if llm_config.api_key:
+                kwargs["api_key"] = llm_config.api_key
+            if llm_config.api_base:
+                kwargs["api_base"] = llm_config.api_base
+            lm = dspy.LM(**kwargs)
+            dspy.configure(lm=lm)
+            return lm
+        except Exception as e:
+            logger.warning("Could not create DSPy LM: %s", e)
             return None
