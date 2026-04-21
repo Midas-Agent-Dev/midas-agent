@@ -205,10 +205,13 @@ class ConfigDatasetBuilder:
 
     Keeps the last ``max_window`` episodes.  Builds train / val / holdout
     splits (50/25/25) from the window for GEPA evaluation.
+
+    Stores data as dicts internally.  ``build()`` returns ``dspy.Example``
+    objects when DSPy is available, or ``SimpleNamespace`` as fallback.
     """
 
     def __init__(self, max_window: int = DEFAULT_WINDOW_SIZE) -> None:
-        self._episodes: list[SimpleNamespace] = []
+        self._episodes: list[dict] = []
         self._max_window = max_window
 
     @property
@@ -228,16 +231,24 @@ class ConfigDatasetBuilder:
             action_summary: full execution trace (from format_trace)
             score: s_exec for this episode (should be >= 1.0)
         """
-        self._episodes.append(
-            SimpleNamespace(
-                task_input=task_input,
-                expected_behavior=action_summary,
-                score=score,
-            )
-        )
+        self._episodes.append({
+            "task_input": task_input,
+            "expected_behavior": action_summary,
+            "score": score,
+        })
         # Sliding window: drop oldest if over limit
         if len(self._episodes) > self._max_window:
             self._episodes.pop(0)
+
+    def _to_example(self, ep: dict):
+        """Convert an episode dict to a dspy.Example or SimpleNamespace."""
+        if HAS_DSPY:
+            return dspy.Example(
+                task_input=ep["task_input"],
+                expected_behavior=ep["expected_behavior"],
+                score=ep["score"],
+            ).with_inputs("task_input")
+        return SimpleNamespace(**ep)
 
     def build(self) -> tuple[list, list, list]:
         """Return ``(train, val, holdout)`` with a 50/25/25 split."""
@@ -248,9 +259,10 @@ class ConfigDatasetBuilder:
         n_train = max(1, math.floor(n * 0.5))
         n_val = math.floor(n * 0.25)
 
-        train = self._episodes[:n_train]
-        val = self._episodes[n_train : n_train + n_val]
-        holdout = self._episodes[n_train + n_val :]
+        examples = [self._to_example(ep) for ep in self._episodes]
+        train = examples[:n_train]
+        val = examples[n_train : n_train + n_val]
+        holdout = examples[n_train + n_val :]
         return train, val, holdout
 
 
