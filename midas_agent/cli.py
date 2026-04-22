@@ -54,6 +54,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         const="auto",
         help="Resume from a training directory. No value = auto-detect latest.",
     )
+    train_parser.add_argument(
+        "--train-dir",
+        default=None,
+        help="Custom training directory name (default: auto-generated timestamp)",
+    )
 
     # -- infer subcommand --
     infer_parser = subparsers.add_parser("infer", help="Run inference")
@@ -157,10 +162,11 @@ def _cmd_train(args: argparse.Namespace) -> None:
             sys.exit(1)
         issues = [issues[args.issue_index]]
 
+    train_dir_name = getattr(args, "train_dir", None)
     print(f"Training: {len(issues)} issues, budget={config.initial_budget}")
     run_training(
         config, issues=issues, fresh=fresh, resume_dir=resume,
-        config_path=config_path,
+        config_path=config_path, train_dir_name=train_dir_name,
     )
 
 

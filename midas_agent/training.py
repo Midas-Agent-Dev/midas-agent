@@ -217,6 +217,7 @@ def run_training(
     fresh: bool = False,
     resume_dir: str | None = None,
     config_path: str | None = None,
+    train_dir_name: str | None = None,
 ) -> None:
     """Run the full training loop.
 
@@ -243,8 +244,8 @@ def run_training(
         train_dir = None
 
     if train_dir is None:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        train_dir = os.path.join(".midas", "train", timestamp)
+        name = train_dir_name or datetime.now().strftime("%Y%m%d_%H%M%S")
+        train_dir = os.path.join(".midas", "train", name)
 
     os.makedirs(os.path.join(train_dir, "data"), exist_ok=True)
     os.makedirs(os.path.join(train_dir, "log", "configs"), exist_ok=True)
