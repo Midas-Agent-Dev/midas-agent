@@ -121,6 +121,34 @@ def clone_repo(repo: str, base_commit: str, dest: str) -> None:
         )
 
 
+def _setup_and_execute_workspace(ws, repo_dir, config, issue, ws_repo_dirs, containers):
+    """Setup Docker + execute for one workspace. Runs in a thread."""
+    if os.path.isdir(os.path.join(repo_dir, ".git")):
+        ws_repo = os.path.join(repo_dir + "_workspaces", ws.workspace_id)
+        shutil.copytree(repo_dir, ws_repo)
+        ws.work_dir = ws_repo
+        ws_repo_dirs.append(ws_repo)
+
+    if config.execution_env == "docker":
+        try:
+            from midas_agent.docker.container_manager import ContainerManager
+            from midas_agent.runtime.io_backend import DockerIO
+
+            cm = ContainerManager()
+            image = _resolve_swebench_image(issue)
+            cid = cm.start(image=image, host_workspace=None, install_cmd=None)
+            containers.append(cm)
+            docker_io = DockerIO(container_id=cid, workdir="/testbed")
+            if hasattr(ws, "_io"):
+                ws._io = docker_io
+            logger.info("  %s: Docker container %s", ws.workspace_id, cid)
+        except Exception as e:
+            logger.warning("  %s: Docker setup failed (%s), falling back to local", ws.workspace_id, e)
+
+    ws.execute(issue)
+    return ws.workspace_id
+
+
 def collect_patches(workspaces, patches_base_dir: str = "") -> dict[str, str]:
     """Read patches from workspace objects (authoritative source)."""
     return {ws.workspace_id: ws._last_patch for ws in workspaces}
@@ -486,49 +514,17 @@ def run_training(
             scheduler.allocate_budgets()
 
             # 3. Setup and execute all workspaces in parallel
-
             workspaces = scheduler.get_workspaces()
             ws_repo_dirs: list[str] = []
-            containers: list = []  # ContainerManager instances to clean up
+            containers: list = []
 
-            def _setup_and_execute(ws):
-                """Setup Docker + execute for one workspace. Runs in a thread."""
-                if os.path.isdir(os.path.join(repo_dir, ".git")):
-                    ws_repo = os.path.join(repo_dir + "_workspaces", ws.workspace_id)
-                    shutil.copytree(repo_dir, ws_repo)
-                    ws.work_dir = ws_repo
-                    ws_repo_dirs.append(ws_repo)
-
-                # Docker mode: start container, set IO backend
-                if config.execution_env == "docker":
-                    try:
-                        from midas_agent.docker.container_manager import ContainerManager
-                        from midas_agent.runtime.io_backend import DockerIO
-
-                        cm = ContainerManager()
-                        image = _resolve_swebench_image(issue)
-                        cid = cm.start(
-                            image=image,
-                            host_workspace=None,
-                            install_cmd=None,
-                        )
-                        containers.append(cm)
-                        docker_io = DockerIO(container_id=cid, workdir="/testbed")
-                        if hasattr(ws, "_io"):
-                            ws._io = docker_io
-                        logger.info("  %s: Docker container %s", ws.workspace_id, cid)
-                    except Exception as e:
-                        logger.warning(
-                            "  %s: Docker setup failed (%s), falling back to local",
-                            ws.workspace_id, e,
-                        )
-
-                ws.execute(issue)
-                return ws.workspace_id
-
-            # Run all workspaces in parallel
             with ThreadPoolExecutor(max_workers=len(workspaces)) as executor:
-                futures = {executor.submit(_setup_and_execute, ws): ws for ws in workspaces}
+                futures = {}
+                for ws in workspaces:
+                    futures[executor.submit(
+                        _setup_and_execute_workspace,
+                        ws, repo_dir, config, issue, ws_repo_dirs, containers,
+                    )] = ws
                 for future in as_completed(futures):
                     ws = futures[future]
                     try:
