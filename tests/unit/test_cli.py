@@ -22,10 +22,10 @@ from midas_agent.cli import build_action_set, parse_args
 class TestTrainArgs:
     """The 'train' subcommand requires --config and has optional --output."""
 
-    def test_train_requires_config(self):
-        """train without --config raises SystemExit."""
-        with pytest.raises(SystemExit):
-            parse_args(["train"])
+    def test_train_config_defaults_to_none(self):
+        """train without --config defaults to None (validated later in _cmd_train)."""
+        args = parse_args(["train"])
+        assert args.config is None
 
     def test_train_parses_config(self):
         args = parse_args(["train", "--config", "train.yaml"])

@@ -23,7 +23,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
     # -- train subcommand --
     train_parser = subparsers.add_parser("train", help="Run training pipeline")
-    train_parser.add_argument("--config", required=True, help="Path to training config YAML")
+    train_parser.add_argument("--config", default=None, help="Path to training config YAML (optional with --resume)")
     train_parser.add_argument(
         "--output",
         default=".midas/agents/",
@@ -89,7 +89,46 @@ def build_action_set(cwd: str, env: str = "local") -> list[Action]:
 
 def _cmd_train(args: argparse.Namespace) -> None:
     """Execute the train subcommand."""
+    import shutil
+
+    import yaml
+
+    from midas_agent.config import MidasConfig
     from midas_agent.resolver import ConfigurationError, resolve_llm_config
+    from midas_agent.training import load_swe_bench, run_training
+
+    resume = getattr(args, "resume", None)
+    fresh = getattr(args, "fresh", False)
+
+    if not args.config and not resume:
+        print("Error: --config is required (or use --resume to continue a previous run)")
+        sys.exit(1)
+
+    # On resume, load training config from the resume directory
+    if resume and not fresh:
+        from midas_agent.training import _find_latest_train_dir
+
+        resume_dir = resume if resume != "auto" else _find_latest_train_dir()
+        if resume_dir:
+            saved_config = os.path.join(resume_dir, "train_config.yaml")
+            if os.path.isfile(saved_config):
+                print(f"Resuming from {resume_dir} (using saved config)")
+                config_path = saved_config
+            elif args.config:
+                print(f"Resuming from {resume_dir} (no saved config, using --config)")
+                config_path = args.config
+            else:
+                print(f"Error: {resume_dir} has no saved config and --config not provided")
+                sys.exit(1)
+        else:
+            print("No checkpoint found, starting fresh")
+            resume = None
+            config_path = args.config
+    else:
+        config_path = args.config
+        if not config_path:
+            print("Error: --config is required for fresh training")
+            sys.exit(1)
 
     try:
         llm_config = resolve_llm_config(cli_model=None, cli_api_key=None)
@@ -97,16 +136,10 @@ def _cmd_train(args: argparse.Namespace) -> None:
         print(str(e))
         sys.exit(1)
 
-    # Load training config from YAML
-    import yaml
-
-    with open(args.config) as f:
+    with open(config_path) as f:
         raw = yaml.safe_load(f) or {}
 
-    from midas_agent.config import MidasConfig
-
     # LLM credentials come from env vars (via resolver), not the YAML.
-    # Strip any model/api_key/api_base from the YAML so resolver wins.
     config_kwargs = {k: v for k, v in raw.items() if k not in ("model", "api_key", "api_base")}
     config = MidasConfig(
         model=llm_config.model,
@@ -114,8 +147,6 @@ def _cmd_train(args: argparse.Namespace) -> None:
         api_base=llm_config.api_base or "",
         **config_kwargs,
     )
-
-    from midas_agent.training import load_swe_bench, run_training
 
     issues = load_swe_bench()
     if args.issues is not None:
@@ -126,10 +157,11 @@ def _cmd_train(args: argparse.Namespace) -> None:
             sys.exit(1)
         issues = [issues[args.issue_index]]
 
-    fresh = getattr(args, "fresh", False)
-    resume = getattr(args, "resume", None)
     print(f"Training: {len(issues)} issues, budget={config.initial_budget}")
-    run_training(config, issues=issues, fresh=fresh, resume_dir=resume)
+    run_training(
+        config, issues=issues, fresh=fresh, resume_dir=resume,
+        config_path=config_path,
+    )
 
 
 def _cmd_infer(args: argparse.Namespace) -> None:

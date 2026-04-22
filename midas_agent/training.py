@@ -216,6 +216,7 @@ def run_training(
     issues: list[Issue] | None = None,
     fresh: bool = False,
     resume_dir: str | None = None,
+    config_path: str | None = None,
 ) -> None:
     """Run the full training loop.
 
@@ -248,6 +249,12 @@ def run_training(
     os.makedirs(os.path.join(train_dir, "data"), exist_ok=True)
     os.makedirs(os.path.join(train_dir, "log", "configs"), exist_ok=True)
     os.makedirs(os.path.join(train_dir, "log", "action_logs"), exist_ok=True)
+
+    # Save training config into train_dir for resume
+    saved_config = os.path.join(train_dir, "train_config.yaml")
+    if config_path and not os.path.isfile(saved_config):
+        import shutil
+        shutil.copy2(config_path, saved_config)
 
     # -- Wire up all components --
     storage = InMemoryStorageBackend()
