@@ -284,14 +284,13 @@ class ReactAgent:
                         if not messages or messages[0].get("role") != "system":
                             messages.insert(0, {"role": "system", "content": self.system_prompt})
             elif response.content:
+                # Text response without tool call — the LLM is thinking
+                # aloud.  Append to conversation and continue so it can
+                # produce the next tool call.
                 logger.info("  [iter %d] Response: %s", iterations, response.content[:200])
-                return AgentResult(
-                    output=response.content,
-                    iterations=iterations,
-                    termination_reason="done",
-                    action_history=action_history,
-                )
+                messages.append({"role": "assistant", "content": response.content})
             else:
+                # Completely empty response — terminate.
                 return AgentResult(
                     output="",
                     iterations=iterations,
