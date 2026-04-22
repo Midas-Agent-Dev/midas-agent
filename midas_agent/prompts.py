@@ -134,20 +134,36 @@ Given a BASE workflow DAG and a GitHub issue, rewrite ONLY the prompt field \
 of each step to embed the relevant parts of the issue. Keep everything else \
 (meta, step IDs, tools, inputs) EXACTLY as-is.
 
-## Rules for splitting the issue across steps
-- **localize**: Include the issue title and key symptoms (error messages, \
-unexpected behavior). The agent needs to know WHAT to search for. Do NOT \
-include reproduction code or fix hints.
-- **investigate**: Include the reproduction code so the agent can observe the \
-bug. Reference the localize step's output for file locations.
-- **fix**: Include the expected correct behavior. Reference the investigate \
-step's findings for root cause. Do NOT include reproduction code.
-- **validate**: Include test expectations and verification steps. Reference \
-the fix step's changes.
+## Step 1: Extract the GOAL from the issue
+
+First, extract a one-sentence success criteria from the issue. This is what \
+"done" looks like. Examples:
+- "GOAL: `separability_matrix(Pix2Sky_TAN() & cm)` should return the same \
+diagonal result as the flat compound version."
+- "GOAL: Removing a required column from TimeSeries should raise a clear error \
+naming the missing column, not 'expected time but found time'."
+- "GOAL: `Table.write(format='html', formats=...)` should respect the formats \
+argument, producing formatted values like '1.24e-24' instead of full precision."
+
+## Step 2: Embed the GOAL in EVERY step
+
+Include the extracted GOAL line at the TOP of every step prompt. The agent \
+may lose context over long conversations — the goal must always be visible.
+
+## Step 3: Split the remaining issue context across steps
+- **localize**: Include symptoms (error messages, unexpected behavior) to \
+search for. Do NOT include reproduction code or fix hints.
+- **investigate**: Include the reproduction code. Reference localize output.
+- **fix**: Include expected correct behavior. Reference investigate findings. \
+The fix+validate step should iterate: apply fix, run tests, if tests fail \
+adjust and retry.
+- **validate**: Include test expectations. If tests fail, go back and fix \
+the code — do not just report failure.
 
 ## Constraints
 - Each step prompt must be self-contained — the agent sees NOTHING else
-- Do NOT repeat the full issue in every step
+- The GOAL line must appear at the top of EVERY step prompt
+- Do NOT repeat the full issue in every step (only the goal + step-specific context)
 - Keep each prompt under 2000 characters
 - End each prompt with "Call task_done when complete."
 - Output the COMPLETE YAML with the same structure
