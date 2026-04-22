@@ -9,4 +9,4 @@ mult_max: 3.0
 beta: 0.3
 execution_env: docker
 max_tool_output_chars: 100000
-max_context_tokens: 32000
+max_context_tokens: 100000

@@ -299,15 +299,28 @@ class DAGExecutor:
 
                 # Compaction check
                 if self._max_context_tokens and self._system_llm:
-                    total_chars = sum(len(m.get("content", "")) for m in messages)
+                    total_chars = sum(len(str(m.get("content", ""))) for m in messages)
+                    # Also count tool call arguments
+                    for m in messages:
+                        for tc in m.get("tool_calls", []):
+                            args = tc.get("function", {}).get("arguments", "")
+                            total_chars += len(str(args))
                     total_tokens_est = total_chars // 4
                     from midas_agent.context.compaction import should_compact, build_compaction_prompt, build_compacted_history
                     if should_compact(total_tokens_est, self._max_context_tokens):
+                        logger.info(
+                            "  Context compaction triggered at %d tokens est (%d chars, %d messages)",
+                            total_tokens_est, total_chars, len(messages),
+                        )
                         compact_prompt = build_compaction_prompt(messages)
                         compact_request = LLMRequest(messages=compact_prompt, model="default")
                         compact_response = self._system_llm(compact_request)
                         summary = compact_response.content or ""
                         messages = build_compacted_history(messages, summary)
+                        logger.info(
+                            "  Compacted to %d messages (%d chars)",
+                            len(messages), sum(len(str(m.get("content", ""))) for m in messages),
+                        )
                         if not messages or messages[0].get("role") != "system":
                             messages.insert(0, {"role": "system", "content": first_step.prompt})
 
