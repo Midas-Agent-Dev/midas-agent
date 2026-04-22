@@ -402,12 +402,15 @@ def run_training(
             scheduler.set_current_issue(issue)
             scheduler.allocate_budgets()
 
-            # 3. Execute all workspaces (each gets its own repo copy)
+            # 3. Setup and execute all workspaces in parallel
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+
             workspaces = scheduler.get_workspaces()
             ws_repo_dirs: list[str] = []
             containers: list = []  # ContainerManager instances to clean up
 
-            for ws in workspaces:
+            def _setup_and_execute(ws):
+                """Setup Docker + execute for one workspace. Runs in a thread."""
                 if os.path.isdir(os.path.join(repo_dir, ".git")):
                     ws_repo = os.path.join(repo_dir + "_workspaces", ws.workspace_id)
                     shutil.copytree(repo_dir, ws_repo)
@@ -424,11 +427,10 @@ def run_training(
                         image = _resolve_swebench_image(issue)
                         cid = cm.start(
                             image=image,
-                            host_workspace=None,  # no mount — all ops inside container
-                            install_cmd=None,  # conda testbed env already has repo installed
+                            host_workspace=None,
+                            install_cmd=None,
                         )
                         containers.append(cm)
-                        # Set IO backend on workspace — no more action overrides
                         docker_io = DockerIO(container_id=cid, workdir="/testbed")
                         if hasattr(ws, "_io"):
                             ws._io = docker_io
@@ -440,6 +442,17 @@ def run_training(
                         )
 
                 ws.execute(issue)
+                return ws.workspace_id
+
+            # Run all workspaces in parallel
+            with ThreadPoolExecutor(max_workers=len(workspaces)) as executor:
+                futures = {executor.submit(_setup_and_execute, ws): ws for ws in workspaces}
+                for future in as_completed(futures):
+                    ws = futures[future]
+                    try:
+                        future.result()
+                    except Exception as e:
+                        logger.warning("  %s: execution failed: %s", ws.workspace_id, e)
 
             # 4. Submit patches
             for ws in workspaces:
