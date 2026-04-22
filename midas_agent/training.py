@@ -187,6 +187,68 @@ def _load_checkpoint(train_dir: str) -> dict | None:
         return json.load(f)
 
 
+def _save_swebench_artifacts(
+    train_dir: str,
+    issue: Issue,
+    workspaces: list,
+    eval_results: dict,
+) -> None:
+    """Save SWE-bench leaderboard submission artifacts per episode.
+
+    - Appends best workspace's patch to all_preds.jsonl
+    - Saves reasoning trace to trajs/{instance_id}.md
+    """
+    # Find best workspace by s_w score
+    best_ws = None
+    best_score = -1.0
+    for ws in workspaces:
+        result = eval_results.get(ws.workspace_id)
+        if result and result.s_w > best_score:
+            best_score = result.s_w
+            best_ws = ws
+
+    if best_ws is None:
+        return
+
+    patch = getattr(best_ws, "_last_patch", "") or ""
+
+    # Append to all_preds.jsonl
+    preds_path = os.path.join(train_dir, "all_preds.jsonl")
+    pred = {
+        "instance_id": issue.issue_id,
+        "model_name_or_path": "midas-agent",
+        "model_patch": patch,
+    }
+    with open(preds_path, "a") as f:
+        f.write(json.dumps(pred) + "\n")
+
+    # Save reasoning trace
+    trajs_dir = os.path.join(train_dir, "trajs")
+    os.makedirs(trajs_dir, exist_ok=True)
+    traj_path = os.path.join(trajs_dir, f"{issue.issue_id}.md")
+
+    last_result = getattr(best_ws, "_last_result", None)
+    trace_lines = [f"# {issue.issue_id}\n"]
+    trace_lines.append(f"**Score**: {best_score:.3f}\n")
+    trace_lines.append(f"**Workspace**: {best_ws.workspace_id}\n\n")
+
+    if last_result and last_result.action_history:
+        trace_lines.append("## Trace\n\n```\n")
+        from midas_agent.workspace.config_evolution.config_creator import format_trace
+        trace_lines.append(format_trace(last_result.action_history))
+        trace_lines.append("\n```\n")
+
+    if patch:
+        trace_lines.append("\n## Patch\n\n```diff\n")
+        trace_lines.append(patch[:5000])  # cap at 5K chars
+        if len(patch) > 5000:
+            trace_lines.append(f"\n... ({len(patch) - 5000} more chars)")
+        trace_lines.append("\n```\n")
+
+    with open(traj_path, "w") as f:
+        f.write("".join(trace_lines))
+
+
 def _rebuild_workspace_config(train_dir: str, config_filename: str):
     """Rebuild a WorkflowConfig from a saved YAML file."""
     from midas_agent.workspace.config_evolution.config_creator import _parse_config_yaml
@@ -480,7 +542,12 @@ def run_training(
             # 7. Replace evicted workspaces (seeded with best-η config)
             scheduler.replace_evicted()
 
-            # 8. Save checkpoint
+            # 8. Save SWE-bench submission artifacts
+            _save_swebench_artifacts(
+                train_dir, issue, workspaces, eval_results,
+            )
+
+            # 10. Save checkpoint
             processed_issue_ids.append(issue.issue_id)
             _save_checkpoint(
                 train_dir, global_idx, processed_issue_ids,
@@ -488,7 +555,7 @@ def run_training(
             )
 
         finally:
-            # 9. Clean up containers and repo copies
+            # 11. Clean up containers and repo copies
             for cm in containers:
                 try:
                     cm.stop()
