@@ -7,6 +7,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 
 from midas_agent.config import MidasConfig
@@ -485,7 +486,6 @@ def run_training(
             scheduler.allocate_budgets()
 
             # 3. Setup and execute all workspaces in parallel
-            from concurrent.futures import ThreadPoolExecutor, as_completed
 
             workspaces = scheduler.get_workspaces()
             ws_repo_dirs: list[str] = []
