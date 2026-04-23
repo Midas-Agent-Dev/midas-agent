@@ -186,16 +186,12 @@ class DAGExecutor:
         logger.info("  [step 1/%d] %s", len(sorted_ids), current_step_id)
 
         def _advance_to_next_step(output_text: str) -> bool:
-            """Advance to next step with memory cut.
-
-            Truncates messages to: system prompt + issue context +
-            previous step summary + new step prompt. This prevents
-            context bloat and keeps the agent focused.
+            """Advance to next step, keeping full conversation history.
 
             Returns True if there are more steps.
             """
             nonlocal current_step_idx, current_step_id, current_step
-            nonlocal step_iterations, step_action_start, tools, messages
+            nonlocal step_iterations, step_action_start, tools
 
             step_outputs[current_step_id] = output_text
             logger.info(
@@ -224,29 +220,15 @@ class DAGExecutor:
                 system_prompt="", actions=dag_actions, call_llm=call_llm,
             )._build_tools()
 
-            # Memory cut: reset messages to system + issue + step summary
-            prev_steps_summary = "\n".join(
-                f"- **{sid}**: {step_outputs[sid][:300]}"
-                for sid in sorted_ids[:current_step_idx]
-                if sid in step_outputs
-            )
-
-            messages = [
-                {"role": "system", "content": DAG_SYSTEM_PROMPT},
-                {"role": "user", "content": (
-                    f"Here is the issue to fix:\n\n{issue.description}\n\n"
-                    f"---\n\n"
-                    f"## Completed steps\n{prev_steps_summary}\n\n"
-                    f"---\n\n"
+            # Inject next step prompt into the same conversation
+            messages.append({
+                "role": "user",
+                "content": (
                     f"**Current phase: {current_step_id}**\n\n"
                     f"{current_step.prompt}\n\n"
                     f"Focus ONLY on this phase."
-                )},
-            ]
-            logger.info(
-                "  Memory cut: %d messages, starting fresh for step '%s'",
-                len(messages), current_step_id,
-            )
+                ),
+            })
             return True
 
         while True:
