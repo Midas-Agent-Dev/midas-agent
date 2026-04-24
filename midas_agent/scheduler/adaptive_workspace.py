@@ -1,8 +1,8 @@
 """Adaptive workspace controller — 1 workspace normally, 2 during head-to-head.
 
 Only runs 2 workspaces when GEPA produces a different config to compare.
-Otherwise runs 1 to save budget. Selects winner by average η over the
-head-to-head phase.
+Otherwise runs 1 to save budget. Selects winner by total score (issues solved)
+over the head-to-head phase.
 """
 from __future__ import annotations
 
@@ -14,13 +14,17 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class PhaseStats:
-    """Tracks η values for a workspace across a phase."""
+    """Tracks scores for a workspace across a phase."""
     workspace_id: str
-    etas: list[float] = field(default_factory=list)
+    scores: list[float] = field(default_factory=list)
 
     @property
-    def avg_eta(self) -> float:
-        return sum(self.etas) / len(self.etas) if self.etas else 0.0
+    def avg_score(self) -> float:
+        return sum(self.scores) / len(self.scores) if self.scores else 0.0
+
+    @property
+    def total_score(self) -> float:
+        return sum(self.scores)
 
 
 class AdaptiveWorkspaceController:
@@ -56,12 +60,12 @@ class AdaptiveWorkspaceController:
         self.champion_stats = PhaseStats(workspace_id=workspace_id)
         logger.info("Adaptive: champion = %s (phase: SINGLE)", workspace_id)
 
-    def record_episode(self, workspace_id: str, eta: float) -> None:
-        """Record η for a workspace after an episode."""
+    def record_episode(self, workspace_id: str, score: float) -> None:
+        """Record score for a workspace after an episode."""
         if self.champion_stats and workspace_id == self.champion_stats.workspace_id:
-            self.champion_stats.etas.append(eta)
+            self.champion_stats.scores.append(score)
         elif self.challenger_stats and workspace_id == self.challenger_stats.workspace_id:
-            self.challenger_stats.etas.append(eta)
+            self.challenger_stats.scores.append(score)
 
     def on_gepa_result(
         self,
@@ -90,11 +94,11 @@ class AdaptiveWorkspaceController:
                 return {"action": "stay_single"}
 
         else:  # HEAD_TO_HEAD
-            # Select winner by average η
-            champ_avg = self.champion_stats.avg_eta if self.champion_stats else 0
-            chall_avg = self.challenger_stats.avg_eta if self.challenger_stats else 0
+            # Select winner by total score (more issues solved = better)
+            champ_score = self.champion_stats.total_score if self.champion_stats else 0
+            chall_score = self.challenger_stats.total_score if self.challenger_stats else 0
 
-            if champ_avg >= chall_avg:
+            if champ_score >= chall_score:
                 winner = self.champion_stats
                 loser = self.challenger_stats
             else:
@@ -105,8 +109,8 @@ class AdaptiveWorkspaceController:
             loser_id = loser.workspace_id if loser else ""
 
             logger.info(
-                "Adaptive: phase end — champion η=%.6f, challenger η=%.6f → winner=%s",
-                champ_avg, chall_avg, winner_id,
+                "Adaptive: phase end — champion score=%.1f, challenger score=%.1f → winner=%s",
+                champ_score, chall_score, winner_id,
             )
 
             # Count how many configs changed
@@ -178,11 +182,11 @@ class AdaptiveWorkspaceController:
             "phase": self.phase,
             "champion": {
                 "workspace_id": self.champion_stats.workspace_id,
-                "etas": self.champion_stats.etas,
+                "scores": self.champion_stats.scores,
             } if self.champion_stats else None,
             "challenger": {
                 "workspace_id": self.challenger_stats.workspace_id,
-                "etas": self.challenger_stats.etas,
+                "scores": self.challenger_stats.scores,
             } if self.challenger_stats else None,
         }
 
@@ -195,12 +199,12 @@ class AdaptiveWorkspaceController:
         if champ:
             ctrl.champion_stats = PhaseStats(
                 workspace_id=champ["workspace_id"],
-                etas=champ.get("etas", []),
+                scores=champ.get("scores", []),
             )
         chall = data.get("challenger")
         if chall:
             ctrl.challenger_stats = PhaseStats(
                 workspace_id=chall["workspace_id"],
-                etas=chall.get("etas", []),
+                scores=chall.get("scores", []),
             )
         return ctrl

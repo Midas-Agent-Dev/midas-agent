@@ -578,9 +578,7 @@ def run_training(
                 for ws in workspaces:
                     r = eval_results.get(ws.workspace_id)
                     if r:
-                        cost = max(1, ws.budget_received)
-                        eta = r.s_w / cost
-                        adaptive_ctrl.record_episode(ws.workspace_id, eta)
+                        adaptive_ctrl.record_episode(ws.workspace_id, r.s_exec)
 
                 # Check if any workspace's GEPA changed its config
                 gepa_changes = {
