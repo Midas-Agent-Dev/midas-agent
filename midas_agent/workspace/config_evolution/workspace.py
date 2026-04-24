@@ -164,22 +164,46 @@ class ConfigEvolutionWorkspace(Workspace):
             and self._last_result.action_history
         )
 
-        # -- Record successful episodes for GEPA (before config creation) --
-        if (
-            my_score >= 1.0
-            and has_trace
-            and self._last_issue is not None
-        ):
+        # -- Record episode for GEPA (success and failure) --
+        if has_trace and self._last_issue is not None:
             from midas_agent.workspace.config_evolution.config_creator import (
                 format_trace,
             )
             full_trace = format_trace(self._last_result.action_history)
-            self._prompt_optimizer.record_episode(
-                task_input=self._last_issue.description,
-                action_summary=full_trace,
-                score=my_score,
-                issue_id=self._last_issue.issue_id,
-            )
+
+            if my_score >= 1.0:
+                self._prompt_optimizer.record_episode(
+                    task_input=self._last_issue.description,
+                    action_summary=full_trace,
+                    score=my_score,
+                    issue_id=self._last_issue.issue_id,
+                )
+            else:
+                # Analyze failure and record with reason
+                failure_reason = None
+                if not self._is_default_config() and self._system_llm:
+                    from midas_agent.workspace.config_evolution.failure_analyzer import FailureAnalyzer
+                    analyzer = FailureAnalyzer(self._system_llm)
+                    step_ids = [s.id for s in self._workflow_config.steps]
+                    analysis = analyzer.analyze(
+                        issue_summary=self._last_issue.description[:500],
+                        trace=full_trace[:3000],
+                        step_ids=step_ids,
+                    )
+                    if analysis:
+                        failure_reason = f"[{analysis.step_id}] {analysis.lesson}"
+                        logger.info(
+                            "Workspace %s: failure analysis — %s",
+                            self.workspace_id, failure_reason,
+                        )
+
+                self._prompt_optimizer.record_failure(
+                    task_input=self._last_issue.description,
+                    action_summary=full_trace,
+                    score=my_score,
+                    failure_reason=failure_reason,
+                    issue_id=self._last_issue.issue_id,
+                )
 
         # -- Config creation on first success --
         # If we still have the default single-step config and this episode
