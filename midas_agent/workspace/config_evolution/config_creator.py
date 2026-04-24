@@ -300,22 +300,10 @@ class ConfigMerger:
                 )
                 continue
 
-            # Structural check: same step IDs, tools, inputs
-            if not self._structure_preserved(base_config, merged):
-                messages.append({"role": "assistant", "content": resp.content or ""})
-                messages.append({
-                    "role": "user",
-                    "content": (
-                        "The merged config changed the DAG structure (step IDs, tools, "
-                        "or inputs). You must keep these EXACTLY as the base config. "
-                        "Only rewrite the prompt fields. Please try again."
-                    ),
-                })
-                logger.info(
-                    "Config merge: structure changed, retrying (attempt %d/%d)",
-                    attempt + 1, 1 + MAX_MERGE_RETRIES,
-                )
-                continue
+            # Repair structure: keep base IDs/tools/inputs, only take merged prompts.
+            # The LLM often slightly modifies structure — instead of rejecting,
+            # we extract the prompts and graft them onto the base config.
+            merged = self._repair_structure(base_config, merged)
 
             # Verify prompts actually changed — issue must be embedded
             prompts_changed = any(
@@ -350,14 +338,30 @@ class ConfigMerger:
         )
 
     @staticmethod
-    def _structure_preserved(
+    def _repair_structure(
         base: WorkflowConfig,
         merged: WorkflowConfig,
-    ) -> bool:
-        """Check that merged config has same structure as base."""
-        if len(base.steps) != len(merged.steps):
-            return False
-        for b, m in zip(base.steps, merged.steps):
-            if b.id != m.id or b.tools != m.tools or b.inputs != m.inputs:
-                return False
-        return True
+    ) -> WorkflowConfig:
+        """Graft merged prompts onto the base config structure.
+
+        The LLM often changes step IDs, tools, or inputs slightly.
+        Instead of rejecting, we keep the base structure and only
+        take the new prompts — matched by position.
+        """
+        repaired_steps = []
+        for i, base_step in enumerate(base.steps):
+            # Take prompt from merged (by position) if available
+            if i < len(merged.steps):
+                new_prompt = merged.steps[i].prompt
+            else:
+                new_prompt = base_step.prompt
+
+            repaired_steps.append(StepConfig(
+                id=base_step.id,
+                prompt=new_prompt,
+                tools=base_step.tools,
+                inputs=base_step.inputs,
+                goal=base_step.goal,
+            ))
+
+        return WorkflowConfig(meta=base.meta, steps=repaired_steps)
