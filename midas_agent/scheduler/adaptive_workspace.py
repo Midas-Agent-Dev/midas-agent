@@ -168,7 +168,7 @@ class AdaptiveWorkspaceController:
         self.challenger_stats = PhaseStats(workspace_id=challenger_id)
         # Reset champion stats for the new phase
         if self.champion_stats:
-            self.champion_stats.etas = []
+            self.champion_stats.scores = []
         self.phase = self.HEAD_TO_HEAD
         logger.info(
             "Adaptive: HEAD_TO_HEAD started — %s vs %s",

@@ -9,13 +9,13 @@ from midas_agent.scheduler.adaptive_workspace import (
 
 @pytest.mark.unit
 class TestPhaseStats:
-    def test_avg_eta_empty(self):
+    def test_avg_score_empty(self):
         stats = PhaseStats(workspace_id="ws-0")
-        assert stats.avg_eta == 0.0
+        assert stats.avg_score == 0.0
 
-    def test_avg_eta(self):
-        stats = PhaseStats(workspace_id="ws-0", etas=[0.1, 0.2, 0.3])
-        assert pytest.approx(stats.avg_eta) == 0.2
+    def test_avg_score(self):
+        stats = PhaseStats(workspace_id="ws-0", scores=[0.1, 0.2, 0.3])
+        assert pytest.approx(stats.avg_score) == 0.2
 
 
 @pytest.mark.unit
@@ -34,20 +34,20 @@ class TestAdaptiveWorkspaceController:
         ctrl = AdaptiveWorkspaceController()
         ctrl.init_champion("ws-0")
         ctrl.record_episode("ws-0", 0.5)
-        assert ctrl.champion_stats.etas == [0.5]
+        assert ctrl.champion_stats.scores == [0.5]
 
     def test_record_episode_challenger(self):
         ctrl = AdaptiveWorkspaceController()
         ctrl.init_champion("ws-0")
         ctrl.start_head_to_head("ws-1")
         ctrl.record_episode("ws-1", 0.3)
-        assert ctrl.challenger_stats.etas == [0.3]
+        assert ctrl.challenger_stats.scores == [0.3]
 
     def test_record_episode_unknown_ignored(self):
         ctrl = AdaptiveWorkspaceController()
         ctrl.init_champion("ws-0")
         ctrl.record_episode("ws-unknown", 0.5)
-        assert ctrl.champion_stats.etas == []
+        assert ctrl.champion_stats.scores == []
 
     # --- Phase transitions ---
 
@@ -127,13 +127,13 @@ class TestAdaptiveWorkspaceController:
         assert result["action"] == "continue_h2h"
         assert ctrl.phase == "head_to_head"
 
-    def test_h2h_resets_etas_for_new_phase(self):
+    def test_h2h_resets_scores_for_new_phase(self):
         ctrl = AdaptiveWorkspaceController()
         ctrl.init_champion("ws-0")
         ctrl.record_episode("ws-0", 0.5)
         ctrl.start_head_to_head("ws-1")
-        # Champion etas should be reset for the new phase
-        assert ctrl.champion_stats.etas == []
+        # Champion scores should be reset for the new phase
+        assert ctrl.champion_stats.scores == []
 
     def test_multiple_episodes_avg(self):
         ctrl = AdaptiveWorkspaceController()
@@ -142,8 +142,8 @@ class TestAdaptiveWorkspaceController:
         for _ in range(5):
             ctrl.record_episode("ws-0", 0.6)
             ctrl.record_episode("ws-1", 0.4)
-        assert pytest.approx(ctrl.champion_stats.avg_eta) == 0.6
-        assert pytest.approx(ctrl.challenger_stats.avg_eta) == 0.4
+        assert pytest.approx(ctrl.champion_stats.avg_score) == 0.6
+        assert pytest.approx(ctrl.challenger_stats.avg_score) == 0.4
 
     def test_full_lifecycle(self):
         """Single → H2H → Single → H2H full cycle."""
@@ -185,7 +185,7 @@ class TestAdaptiveWorkspaceController:
         d = ctrl.to_dict()
         assert d["phase"] == "single"
         assert d["champion"]["workspace_id"] == "ws-0"
-        assert d["champion"]["etas"] == [0.5]
+        assert d["champion"]["scores"] == [0.5]
         assert d["challenger"] is None
 
     def test_to_dict_h2h(self):
@@ -198,26 +198,26 @@ class TestAdaptiveWorkspaceController:
         assert d["phase"] == "head_to_head"
         assert d["champion"]["workspace_id"] == "ws-0"
         assert d["challenger"]["workspace_id"] == "ws-1"
-        assert d["challenger"]["etas"] == [0.4]
+        assert d["challenger"]["scores"] == [0.4]
 
     def test_from_dict_single(self):
         data = {
             "phase": "single",
-            "champion": {"workspace_id": "ws-0", "etas": [0.3, 0.7]},
+            "champion": {"workspace_id": "ws-0", "scores": [0.3, 0.7]},
             "challenger": None,
         }
         ctrl = AdaptiveWorkspaceController.from_dict(data)
         assert ctrl.phase == "single"
         assert ctrl.active_count == 1
         assert ctrl.champion_stats.workspace_id == "ws-0"
-        assert ctrl.champion_stats.etas == [0.3, 0.7]
+        assert ctrl.champion_stats.scores == [0.3, 0.7]
         assert ctrl.challenger_stats is None
 
     def test_from_dict_h2h(self):
         data = {
             "phase": "head_to_head",
-            "champion": {"workspace_id": "ws-0", "etas": [0.6]},
-            "challenger": {"workspace_id": "ws-1", "etas": [0.4]},
+            "champion": {"workspace_id": "ws-0", "scores": [0.6]},
+            "challenger": {"workspace_id": "ws-1", "scores": [0.4]},
         }
         ctrl = AdaptiveWorkspaceController.from_dict(data)
         assert ctrl.phase == "head_to_head"
@@ -236,6 +236,6 @@ class TestAdaptiveWorkspaceController:
         restored = AdaptiveWorkspaceController.from_dict(ctrl.to_dict())
         assert restored.phase == ctrl.phase
         assert restored.champion_stats.workspace_id == "ws-0"
-        assert restored.champion_stats.etas == [0.8, 0.6]
+        assert restored.champion_stats.scores == [0.8, 0.6]
         assert restored.challenger_stats.workspace_id == "ws-1"
-        assert restored.challenger_stats.etas == [0.5]
+        assert restored.challenger_stats.scores == [0.5]
