@@ -61,14 +61,26 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
 
     # -- infer subcommand --
-    infer_parser = subparsers.add_parser("infer", help="Run inference")
-    infer_parser.add_argument("--artifact", default=None, help="Path to artifact file")
+    infer_parser = subparsers.add_parser("infer", help="Run inference with a DAG config")
+    infer_parser.add_argument("--dag", required=True, help="Path to DAG config YAML")
     infer_parser.add_argument("--model", default=None, help="LLM model name")
-    infer_parser.add_argument("--budget", default=None, type=int, help="Token budget")
+    infer_parser.add_argument("--budget", default=None, type=int, help="Token budget (default: 1500000)")
+    infer_parser.add_argument(
+        "--issues",
+        type=int,
+        default=None,
+        help="Run on N SWE-bench issues (eval mode). Omit for interactive TUI.",
+    )
+    infer_parser.add_argument(
+        "--issue-index",
+        type=_nonneg_int,
+        default=None,
+        help="Run on a single issue by its 0-based index",
+    )
     infer_parser.add_argument(
         "--env",
-        default="local",
-        help='Execution environment: "local" or "docker" (default: local)',
+        default="docker",
+        help='Execution environment: "local" or "docker" (default: docker)',
     )
 
     return parser.parse_args(argv)
@@ -171,8 +183,24 @@ def _cmd_train(args: argparse.Namespace) -> None:
 
 
 def _cmd_infer(args: argparse.Namespace) -> None:
-    """Execute the infer subcommand."""
-    from midas_agent.resolver import ConfigurationError, resolve_artifact_path, resolve_llm_config
+    """Execute the infer subcommand.
+
+    Two modes:
+      - Interactive TUI (default): load DAG config, launch REPL
+      - Eval (--issues N): run DAG on SWE-bench issues, report scores
+    """
+    import logging
+    import time
+    import yaml
+
+    from midas_agent.resolver import ConfigurationError, resolve_llm_config
+    from midas_agent.workspace.config_evolution.config_creator import _parse_config_yaml
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+    )
+    logger = logging.getLogger("midas-infer")
 
     try:
         llm_config = resolve_llm_config(cli_model=args.model, cli_api_key=None)
@@ -180,36 +208,160 @@ def _cmd_infer(args: argparse.Namespace) -> None:
         print(str(e))
         sys.exit(1)
 
-    artifact_path = resolve_artifact_path(explicit=args.artifact)
+    # Load DAG config
+    with open(args.dag) as f:
+        dag_config = _parse_config_yaml(f.read())
+    if dag_config is None:
+        print(f"Error: failed to parse DAG config from {args.dag}")
+        sys.exit(1)
 
-    from midas_agent.inference.schemas import GraphEmergenceArtifact
-
-    with open(artifact_path) as f:
-        artifact = GraphEmergenceArtifact.model_validate_json(f.read())
+    print(f"DAG: {dag_config.meta.name} ({len(dag_config.steps)} steps)")
 
     from midas_agent.llm.litellm_provider import LiteLLMProvider
 
-    llm_provider = LiteLLMProvider(
+    provider = LiteLLMProvider(
         model=llm_config.model,
         api_key=llm_config.api_key,
         api_base=llm_config.api_base,
     )
 
-    actions = build_action_set(cwd=os.getcwd(), env=args.env)
+    budget = args.budget or 1_500_000
 
-    budget = args.budget or artifact.budget_hint
+    if args.issues is not None or args.issue_index is not None:
+        # -- Eval mode: run on SWE-bench issues --
+        _infer_eval(args, dag_config, provider, budget, logger)
+    else:
+        # -- Interactive TUI mode --
+        _infer_tui(dag_config, provider, budget)
 
-    from midas_agent.inference.production_meter import ProductionResourceMeter
 
-    meter = ProductionResourceMeter(llm_provider, budget)
-    call_llm = lambda req: meter.process(req)
+def _infer_eval(args, dag_config, provider, budget, logger):
+    """Run DAG config on SWE-bench issues with scoring (frozen config)."""
+    import time
+    from midas_agent.training import load_swe_bench, _resolve_swebench_image
+    from midas_agent.stdlib.action import ActionRegistry
+    from midas_agent.stdlib.actions.bash import BashAction
+    from midas_agent.stdlib.actions.str_replace_editor import StrReplaceEditorAction
+    from midas_agent.workspace.config_evolution.executor import DAGExecutor
+    from midas_agent.workspace.config_evolution.config_creator import ConfigMerger
+    from midas_agent.docker.container_manager import ContainerManager
+    from midas_agent.runtime.io_backend import DockerIO
+    from midas_agent.evaluation.swebench_scorer import SWEBenchScorer
+
+    issues = load_swe_bench()
+    if args.issue_index is not None:
+        issues = [issues[args.issue_index]]
+    elif args.issues is not None:
+        issues = issues[:args.issues]
+
+    print(f"Eval: {len(issues)} issues, budget={budget}")
+
+    def call_llm(req, retries=3):
+        for attempt in range(retries):
+            try:
+                return provider.complete(req)
+            except Exception as e:
+                if attempt < retries - 1:
+                    import time as _t
+                    _t.sleep(2 ** attempt)
+                else:
+                    raise
+
+    system_llm = lambda req: call_llm(req)
+    scorer = SWEBenchScorer(timeout=1800)
+    results = []
+
+    for i, issue in enumerate(issues):
+        print(f"\n{'='*60}")
+        print(f"Issue {i+1}/{len(issues)}: {issue.issue_id}")
+        print(f"{'='*60}")
+
+        try:
+            import subprocess
+            subprocess.run(
+                ["docker", "rm", "-f"] +
+                subprocess.run(["docker", "ps", "-q"], capture_output=True, text=True).stdout.split(),
+                capture_output=True,
+            )
+        except Exception:
+            pass
+
+        cm = ContainerManager()
+        image = _resolve_swebench_image(issue)
+        cid = cm.start(image=image, host_workspace=None, install_cmd=None)
+        io = DockerIO(container_id=cid, workdir="/testbed")
+
+        try:
+            actions = [BashAction(), StrReplaceEditorAction()]
+            for a in actions:
+                if hasattr(a, "_io"):
+                    a._io = io
+
+            registry = ActionRegistry(actions)
+            executor = DAGExecutor(
+                action_registry=registry,
+                max_tool_output_chars=100000,
+                max_context_tokens=32000,
+                system_llm=system_llm,
+            )
+
+            # Merge issue into step prompts
+            merger = ConfigMerger(system_llm=system_llm)
+            merged = merger.merge(dag_config, issue)
+
+            t0 = time.time()
+            result = executor.execute(merged, issue, call_llm,
+                                      balance_provider=lambda: budget)
+            elapsed = time.time() - t0
+
+            # Get patch
+            try:
+                io.run_bash("git add -A")
+                patch = io.run_bash("git diff --cached")
+                io.run_bash("git reset")
+            except Exception:
+                patch = ""
+
+            score = scorer.score(patch, issue)
+            results.append({"issue": issue.issue_id, "score": score,
+                           "iters": len(result.action_history), "patch": len(patch),
+                           "time": elapsed})
+            print(f"  Score: {score:.3f}, iters: {len(result.action_history)}, "
+                  f"patch: {len(patch)} chars, time: {elapsed:.0f}s")
+
+        except Exception as e:
+            print(f"  FAILED: {e}")
+            results.append({"issue": issue.issue_id, "score": 0.0,
+                           "iters": 0, "patch": 0, "time": 0})
+        finally:
+            cm.stop()
+
+    # Summary
+    print(f"\n{'='*60}")
+    print("SUMMARY")
+    print(f"{'='*60}")
+    passed = sum(1 for r in results if r["score"] >= 1.0)
+    print(f"Pass rate: {passed}/{len(results)} ({100*passed/len(results):.0f}%)")
+    for r in results:
+        print(f"  {r['issue']}: score={r['score']:.3f}, "
+              f"iters={r['iters']}, patch={r['patch']} chars, {r['time']:.0f}s")
+
+
+def _infer_tui(dag_config, provider, budget):
+    """Interactive TUI with a DAG config."""
+    from midas_agent.prompts import SYSTEM_PROMPT
+
+    actions = build_action_set(cwd=os.getcwd(), env="local")
+
+    def call_llm(req):
+        return provider.complete(req)
 
     from midas_agent.tui import TUI
 
     tui = TUI(
         call_llm=call_llm,
         actions=actions,
-        system_prompt=artifact.responsible_agent.soul.system_prompt,
+        system_prompt=SYSTEM_PROMPT,
     )
     tui.run()
 
