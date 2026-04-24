@@ -204,6 +204,9 @@ class ConfigEvolutionWorkspace(Workspace):
                 )
                 return None  # survived, config upgraded
 
+        # -- Tick GEPA counter every episode (success or failure) --
+        self._prompt_optimizer.tick_episode()
+
         # -- Normal post-episode flow --
         if self.workspace_id in evicted_ids:
             # Evicted: nothing to do.  The scheduler will replace this

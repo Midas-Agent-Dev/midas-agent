@@ -350,6 +350,14 @@ class GEPAConfigOptimizer:
         if self._dataset.size > 0:
             logger.info("GEPA: reloaded %d episodes from %s", self._dataset.size, data_dir)
 
+    def tick_episode(self) -> None:
+        """Count an episode toward the GEPA trigger interval.
+
+        Called every episode (success or failure) so GEPA triggers
+        after N total episodes, not N successes.
+        """
+        self._episodes_since_last_optimization += 1
+
     def record_episode(
         self,
         task_input: str,
@@ -364,7 +372,6 @@ class GEPAConfigOptimizer:
         stats string.
         """
         self._dataset.add_episode(task_input, action_summary, score)
-        self._episodes_since_last_optimization += 1
 
         # Persist to disk for cross-run reuse
         if self._data_dir:
@@ -385,7 +392,7 @@ class GEPAConfigOptimizer:
         """Check whether it's time to run GEPA."""
         return (
             self._episodes_since_last_optimization >= self._gepa_interval
-            and self._dataset.size >= self._min_dataset_size
+            and self._dataset.size >= 1  # at least 1 success trace needed
         )
 
     def maybe_optimize(self, config: WorkflowConfig) -> tuple[WorkflowConfig, bool]:
