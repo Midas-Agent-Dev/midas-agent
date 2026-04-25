@@ -27,36 +27,32 @@ Issue → ConfigMerger → DAG Executor → Patch → SWE-bench Scorer → Recor
 
 For each SWE-bench issue, `ConfigMerger` embeds the issue into the DAG step prompts. The agent executes each step in sequence — when it stops calling tools and produces text, `StepJudge` validates the claim and advances to the next step. The resulting patch is scored by SWE-bench. Both successes and failures are recorded with their full traces.
 
-### 2. Config Evolution — the Closed Loop (every N episodes)
+### 2. Config Evolution — Closed-Loop Control (every N episodes)
 
-The key insight: SWE-bench provides a **gold standard** — the exact tests that must pass. When the agent fails, we know *why* it failed because we can compare the agent's patch against the gold tests. This ground truth is what closes the loop:
+Like a PID controller, the system uses a **reference signal** (gold standard tests) to measure error and adjust the process:
 
 ```mermaid
-flowchart TD
-    A["Accumulated Traces<br/><i>success + failure traces</i>"] --> B
-    B["Failure Analyzer<br/><i>compares agent's patch against</i><br/><i>gold test expectations</i><br/><i>→ which step? what mistake?</i>"] --> C
-    C["Config Reflector<br/><i>sees: success traces + failure lessons</i><br/><i>rewrites DAG prompts to avoid</i><br/><i>past mistakes</i>"] --> D
-    D["Candidate Config"] --> E
-    E["Head-to-Head Validation<br/><i>champion vs candidate</i><br/><i>same future issues, compare scores</i>"] --> F
-    F{candidate solves<br/>more issues?}
-    F -->|"yes"| G["Candidate → new champion"]
-    F -->|"no"| H["Keep champion"]
-    G --> I["Next N episodes"]
-    H --> I
-    I -->|"new traces"| A
+flowchart LR
+    R["Gold Standard<br/><i>(SWE-bench tests)</i>"] --> E
+    E(("Error<br/>Σ")) --> C
+    C["Controller<br/><b>Config Reflector</b><br/><i>rewrites DAG prompts</i><br/><i>to reduce error</i>"] --> V
+    V["Validation<br/><b>Head-to-Head</b><br/><i>champion vs candidate</i>"] --> P
+    P["Plant<br/><b>DAG Agent</b><br/><i>executes N episodes</i><br/><i>in Docker</i>"] --> O["Output<br/><i>patches</i>"]
+    O --> S
+    S["Sensor<br/><b>SWE-bench Scorer</b><br/><i>pass / fail</i>"] --> FB
+    FB["Feedback<br/><b>Failure Analyzer</b><br/><i>compares patch vs gold tests</i><br/><i>extracts abstract lessons</i>"] --> E
 
-    style A fill:#0d1117,stroke:#58a6ff,color:#fff
-    style B fill:#0d1117,stroke:#f85149,color:#fff
+    style R fill:#0d1117,stroke:#3fb950,color:#fff
+    style E fill:#0d1117,stroke:#f0883e,color:#fff
     style C fill:#0d1117,stroke:#f85149,color:#fff
-    style D fill:#0d1117,stroke:#f0883e,color:#fff
-    style E fill:#0d1117,stroke:#3fb950,color:#fff
-    style F fill:#0d1117,stroke:#f0883e,color:#fff
-    style G fill:#0d1117,stroke:#3fb950,color:#fff
-    style H fill:#0d1117,stroke:#58a6ff,color:#fff
-    style I fill:#0d1117,stroke:#58a6ff,color:#fff
+    style V fill:#0d1117,stroke:#3fb950,color:#fff
+    style P fill:#0d1117,stroke:#58a6ff,color:#fff
+    style O fill:#0d1117,stroke:#58a6ff,color:#fff
+    style S fill:#0d1117,stroke:#58a6ff,color:#fff
+    style FB fill:#0d1117,stroke:#f85149,color:#fff
 ```
 
-Without the gold standard, failure analysis would be guessing. With it, the analyzer can say precisely: *"the agent changed the condition logic but the gold test asserts on the error message string — the fix should have changed the message, not the condition."* This concrete signal is what makes the loop converge.
+The **gold standard** is what makes this work. Without it, failure analysis would be guessing. With it, the analyzer can say precisely: *"the agent changed the condition logic, but the gold test asserts on the error message string — fix the message, not the condition."* This concrete error signal is what makes the loop converge — each cycle of reflection produces prompts that avoid past mistakes.
 
 ## Quick Start
 
