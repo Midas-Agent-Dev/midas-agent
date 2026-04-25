@@ -31,26 +31,24 @@ For each SWE-bench issue, `ConfigMerger` embeds the issue into the DAG step prom
 
 ```mermaid
 flowchart LR
-    R["Gold Standard<br/><i>(SWE-bench tests)</i>"] --> E
-    E(("Σ")) --> C
-    C["<b>Config Reflector</b><br/><i>rewrites DAG prompts</i><br/><i>to reduce error</i>"] --> V
-    V["<b>Head-to-Head</b><br/><i>champion vs candidate</i>"] --> P
-    P["<b>DAG Agent</b><br/><i>executes N episodes</i><br/><i>in Docker</i>"] --> O["patches"]
-    O --> S
-    S["<b>SWE-bench Scorer</b><br/><i>pass / fail</i>"] --> FB
-    FB["<b>Failure Analyzer</b><br/><i>compares patch vs gold tests</i><br/><i>extracts abstract lessons</i>"] --> E
+    GS["<b>Gold Tests</b><br/><i>SWE-bench ground truth</i>"] --> FA
+    FA["<b>Failure Analyzer</b><br/><i>what did the agent do?</i><br/><i>what did the gold test expect?</i><br/><i>→ abstract lesson</i>"] -->|"lessons + traces"| CR
+    CR["<b>Config Reflector</b><br/><i>rewrites DAG prompts</i><br/><i>based on lessons learned</i>"] -->|"candidate config"| HH
+    HH["<b>Head-to-Head</b><br/><i>old config vs new config</i><br/><i>on same future issues</i>"] -->|"winner"| DA
+    DA["<b>DAG Agent</b><br/><i>runs next N issues</i>"] -->|"trace + patch"| SC
+    SC["<b>SWE-bench Scorer</b>"] -->|"pass or fail"| FA
 
-    style R fill:#0d1117,stroke:#3fb950,color:#fff
-    style E fill:#0d1117,stroke:#f0883e,color:#fff
-    style C fill:#0d1117,stroke:#f85149,color:#fff
-    style V fill:#0d1117,stroke:#3fb950,color:#fff
-    style P fill:#0d1117,stroke:#58a6ff,color:#fff
-    style O fill:#0d1117,stroke:#58a6ff,color:#fff
-    style S fill:#0d1117,stroke:#58a6ff,color:#fff
-    style FB fill:#0d1117,stroke:#f85149,color:#fff
+    style GS fill:#0d1117,stroke:#3fb950,color:#fff
+    style FA fill:#0d1117,stroke:#f85149,color:#fff
+    style CR fill:#0d1117,stroke:#f85149,color:#fff
+    style HH fill:#0d1117,stroke:#3fb950,color:#fff
+    style DA fill:#0d1117,stroke:#58a6ff,color:#fff
+    style SC fill:#0d1117,stroke:#58a6ff,color:#fff
 ```
 
-The **gold standard** is what makes this work. Without it, failure analysis would be guessing. With it, the analyzer can say precisely: *"the agent changed the condition logic, but the gold test asserts on the error message string — fix the message, not the condition."* This concrete error signal is what makes the loop converge.
+The gold tests are the key. When an agent fails, the Failure Analyzer sees the full execution trace, the agent's patch, and the gold test names — it can pinpoint exactly what went wrong. For example: *"the agent changed the condition logic, but the gold test asserts on the error message string — the fix should have changed the message, not the condition."*
+
+These lessons feed into the Config Reflector, which rewrites the DAG prompts. Not by appending a list of tips, but by integrating the lessons into the step instructions naturally. The new config is then validated head-to-head against the current one on fresh issues — the winner survives into the next cycle.
 
 ## Quick Start
 
