@@ -605,8 +605,6 @@ def run_training(
             train_dir, episode_idx, processed_issue_ids,
             workspaces, scheduler, None,  # no adaptive controller
         )
-            shutil.rmtree(repo_dir, ignore_errors=True)
-            shutil.rmtree(repo_dir + "_workspaces", ignore_errors=True)
 
     # -- Close action log files (remove empty files from unexecuted workspaces) --
     workspace_manager.close_all_action_logs(remove_empty=True)
