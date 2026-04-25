@@ -191,6 +191,7 @@ class ConfigEvolutionWorkspace(Workspace):
                         step_ids=step_ids,
                         gold_test_names=self._last_issue.fail_to_pass or None,
                         patch=self._last_patch or None,
+                        test_output=getattr(self, "_last_test_output", None),
                     )
                     if analysis:
                         failure_reason = (

@@ -547,6 +547,11 @@ def run_training(
 
                 logger.info("  Score: %.3f (attempt %d/%d)", score, attempt, MAX_RETRIES)
 
+                # Pass test output to workspace for failure analysis
+                scorer = getattr(scheduler._evaluation_module, "_execution_scorer", None)
+                if scorer and hasattr(scorer, "last_test_output"):
+                    ws._last_test_output = scorer.last_test_output
+
                 # 4. Post-episode (record trace, config creation on first success)
                 eval_results_dict = {
                     ws_id: {"s_w": res.s_w, "s_exec": res.s_exec}

@@ -32,6 +32,9 @@ class SWEBenchScorer(ExecutionScorer):
         self._run_id = f"midas-{uuid.uuid4().hex[:8]}"
 
     def score(self, patch: str, issue: Issue) -> float:
+        """Score a patch. Also stores test_output for failure analysis."""
+        self.last_test_output = ""
+
         if not patch or not patch.strip():
             return 0.0
 
@@ -62,8 +65,41 @@ class SWEBenchScorer(ExecutionScorer):
             logger.warning("SWE-bench evaluation returned None for %s", issue.issue_id)
             return 0.0
 
+        # Capture test output from run_instance log
+        self.last_test_output = self._read_test_log(issue.issue_id)
+
         instance_id, report = result
         return self._parse_report(report, issue)
+
+    def _read_test_log(self, instance_id: str) -> str:
+        """Read the test output log from SWE-bench evaluation."""
+        import glob
+        import os
+
+        pattern = f"logs/run_evaluation/{self._run_id}/midas-agent/{instance_id}/run_instance.log"
+        matches = glob.glob(pattern)
+        if not matches:
+            return ""
+
+        try:
+            with open(matches[0]) as f:
+                content = f.read()
+            # Extract the relevant test failure section
+            lines = content.split("\n")
+            failure_lines = []
+            capture = False
+            for line in lines:
+                if "FAILED" in line or "AssertionError" in line or "assert " in line:
+                    capture = True
+                if capture:
+                    failure_lines.append(line)
+                    if len(failure_lines) > 50:
+                        break
+                if capture and line.strip() == "":
+                    capture = False
+            return "\n".join(failure_lines) if failure_lines else content[-3000:]
+        except Exception:
+            return ""
 
     # ------------------------------------------------------------------
     # Helpers

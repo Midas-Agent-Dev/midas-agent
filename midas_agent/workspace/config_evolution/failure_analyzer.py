@@ -25,6 +25,9 @@ a GitHub issue but the gold-standard test failed (score=0).
 ## Gold test that failed
 {gold_test_info}
 
+## Gold test output (what the test actually checked)
+{test_output}
+
 ## Task
 1. Which DAG step went wrong? Choose from: {step_ids}
 2. What SPECIFICALLY did the agent do wrong in that step?
@@ -87,6 +90,7 @@ class FailureAnalyzer:
         step_ids: list[str],
         gold_test_names: list[str] | None = None,
         patch: str | None = None,
+        test_output: str | None = None,
     ) -> FailureAnalysis | None:
         """Analyze a failed trace and return the step + mistake + lesson.
 
@@ -96,6 +100,7 @@ class FailureAnalyzer:
             step_ids: list of step IDs in the DAG config
             gold_test_names: FAIL_TO_PASS test names from SWE-bench
             patch: the agent's actual git diff (if available)
+            test_output: SWE-bench test output showing what failed and why
         """
         rich_trace = _build_rich_trace(trace)
         patch_summary = _extract_patch_summary(trace)
@@ -109,11 +114,15 @@ class FailureAnalyzer:
         if patch:
             gold_test_info += f"\n\nAgent's patch:\n{patch[:2000]}"
 
+        # Gold test output — shows exactly what the test asserted and why it failed
+        test_output_section = test_output[:3000] if test_output else "(test output not available)"
+
         prompt = FAILURE_ANALYSIS_PROMPT.format(
             issue_summary=issue_summary[:1000],
             trace=rich_trace,
             patch_summary=patch_summary,
             gold_test_info=gold_test_info,
+            test_output=test_output_section,
             step_ids=", ".join(step_ids),
         )
 
