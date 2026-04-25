@@ -16,72 +16,23 @@ Over episodes, the DAG prompts evolve from generic instructions into battle-test
 
 ## Pipeline
 
-<p align="center">
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 520" width="800" height="520" font-family="system-ui, sans-serif" font-size="13">
-  <defs>
-    <marker id="ah" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6Z" fill="#888"/></marker>
-  </defs>
+```mermaid
+flowchart TD
+    A["<b>Training Loop</b><br/><i>for each SWE-bench issue</i>"] -->|"issue + merged config"| B
+    B["<b>DAG Executor</b><br/><i>multi-step DAG, generated from first success</i><br/><i>StepJudge validates each transition</i>"] -->|"patch"| C
+    C["<b>SWE-bench Scorer</b>"] -->|"score=0"| D
+    C -.->|"score=1 → record trace"| A
+    D["<b>Failure Analyzer</b><br/><i>sees: trace + patch + gold test names</i><br/><i>outputs: which step failed + abstract lesson</i>"] -->|"lessons"| E
+    E["<b>Config Reflector</b><br/><i>success traces + failure lessons</i><br/><i>→ rewrites all step prompts</i>"] -->|"new config"| F
+    F["<b>Adaptive Workspace</b><br/><i>champion vs challenger, head-to-head</i><br/><i>winner selected by issues solved</i>"] -->|"champion config"| A
 
-  <!-- Background label: CLOSED LOOP -->
-  <text x="400" y="505" text-anchor="middle" fill="#555" font-size="12" font-style="italic">closed-loop training — each cycle improves the next</text>
-
-  <!-- 1. Training Loop -->
-  <rect x="280" y="15" width="240" height="50" rx="10" fill="#1a1a2e" stroke="#e94560" stroke-width="2"/>
-  <text x="400" y="38" text-anchor="middle" fill="#fff" font-weight="bold" font-size="14">Training Loop</text>
-  <text x="400" y="54" text-anchor="middle" fill="#aaa" font-size="11">for each SWE-bench issue</text>
-
-  <!-- 2. DAG Executor -->
-  <rect x="560" y="110" width="220" height="70" rx="10" fill="#1a1a2e" stroke="#0f3460" stroke-width="2"/>
-  <text x="670" y="135" text-anchor="middle" fill="#fff" font-weight="bold">DAG Executor</text>
-  <text x="670" y="153" text-anchor="middle" fill="#aaa" font-size="10">multi-step DAG (generated from first success)</text>
-  <text x="670" y="168" text-anchor="middle" fill="#aaa" font-size="10">StepJudge validates each transition</text>
-
-  <!-- 3. SWE-bench Scorer -->
-  <rect x="560" y="230" width="220" height="50" rx="10" fill="#1a1a2e" stroke="#0f3460" stroke-width="2"/>
-  <text x="670" y="260" text-anchor="middle" fill="#fff" font-weight="bold">SWE-bench Scorer</text>
-
-  <!-- 4. Failure Analyzer -->
-  <rect x="280" y="340" width="240" height="70" rx="10" fill="#1a1a2e" stroke="#e94560" stroke-width="2"/>
-  <text x="400" y="365" text-anchor="middle" fill="#fff" font-weight="bold">Failure Analyzer</text>
-  <text x="400" y="383" text-anchor="middle" fill="#aaa" font-size="10">sees: trace + patch + gold test names</text>
-  <text x="400" y="398" text-anchor="middle" fill="#aaa" font-size="10">outputs: which step failed + abstract lesson</text>
-
-  <!-- 5. GEPA Reflector -->
-  <rect x="20" y="230" width="220" height="70" rx="10" fill="#1a1a2e" stroke="#e94560" stroke-width="2"/>
-  <text x="130" y="255" text-anchor="middle" fill="#fff" font-weight="bold">Config Reflector</text>
-  <text x="130" y="273" text-anchor="middle" fill="#aaa" font-size="10">success traces + failure lessons</text>
-  <text x="130" y="288" text-anchor="middle" fill="#aaa" font-size="10">→ rewrites all step prompts</text>
-
-  <!-- 6. Adaptive Workspace -->
-  <rect x="20" y="110" width="220" height="70" rx="10" fill="#1a1a2e" stroke="#16c79a" stroke-width="2"/>
-  <text x="130" y="135" text-anchor="middle" fill="#fff" font-weight="bold">Adaptive Workspace</text>
-  <text x="130" y="153" text-anchor="middle" fill="#aaa" font-size="10">champion vs challenger (head-to-head)</text>
-  <text x="130" y="168" text-anchor="middle" fill="#aaa" font-size="10">winner selected by issues solved</text>
-
-  <!-- Arrows -->
-  <path d="M520,45 Q600,45 600,110" fill="none" stroke="#888" stroke-width="1.5" marker-end="url(#ah)"/>
-  <text x="575" y="78" fill="#aaa" font-size="10">issue + merged config</text>
-
-  <path d="M670,180 L670,230" fill="none" stroke="#888" stroke-width="1.5" marker-end="url(#ah)"/>
-  <text x="685" y="210" fill="#aaa" font-size="10">patch</text>
-
-  <path d="M560,260 Q400,310 400,340" fill="none" stroke="#888" stroke-width="1.5" marker-end="url(#ah)"/>
-  <text x="460" y="310" fill="#aaa" font-size="10">score=0 → analyze</text>
-
-  <path d="M280,380 Q130,420 130,300" fill="none" stroke="#888" stroke-width="1.5" marker-end="url(#ah)"/>
-  <text x="160" y="370" fill="#aaa" font-size="10">lessons</text>
-
-  <path d="M130,230 L130,180" fill="none" stroke="#888" stroke-width="1.5" marker-end="url(#ah)"/>
-  <text x="85" y="210" fill="#aaa" font-size="10">new config</text>
-
-  <path d="M240,130 Q280,90 280,55" fill="none" stroke="#888" stroke-width="1.5" marker-end="url(#ah)"/>
-  <text x="215" y="78" fill="#aaa" font-size="10">champion config</text>
-
-  <!-- Success path shortcut -->
-  <path d="M560,245 Q460,245 460,65" fill="none" stroke="#16c79a" stroke-width="1.2" stroke-dasharray="5,3" marker-end="url(#ah)"/>
-  <text x="470" y="160" fill="#16c79a" font-size="10">score=1 → record</text>
-</svg>
-</p>
+    style A fill:#1a1a2e,stroke:#e94560,color:#fff
+    style B fill:#1a1a2e,stroke:#0f3460,color:#fff
+    style C fill:#1a1a2e,stroke:#0f3460,color:#fff
+    style D fill:#1a1a2e,stroke:#e94560,color:#fff
+    style E fill:#1a1a2e,stroke:#e94560,color:#fff
+    style F fill:#1a1a2e,stroke:#16c79a,color:#fff
+```
 
 ### How the loop works
 
