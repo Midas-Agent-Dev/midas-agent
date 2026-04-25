@@ -188,6 +188,52 @@ class ReactAgent:
                 ]
                 messages.append(assistant_msg)
 
+                # Check if ALL tool calls are unknown — treat as text response
+                all_unknown = all(
+                    self._actions_by_name.get(tc.name) is None
+                    for tc in response.tool_calls
+                )
+                if all_unknown:
+                    # Model called non-existent tools (e.g. "finish") — treat as done claim
+                    logger.info(
+                        "  [iter %d] Unknown tool(s): %s — treating as text response",
+                        iterations,
+                        ", ".join(tc.name for tc in response.tool_calls),
+                    )
+                    text = response.content or response.tool_calls[0].arguments.get("result", "")
+                    if self.system_llm and action_history:
+                        from midas_agent.workspace.config_evolution.step_judge import StepJudge
+                        judge = StepJudge(self.system_llm)
+                        trace = StepJudge.format_trace_for_judge(action_history, len(action_history))
+                        verdict = judge.validate_completion(
+                            goal="Fix the issue described in the task",
+                            trace=trace,
+                            agent_message=text,
+                        )
+                        if verdict.done:
+                            logger.info("  Judge ACCEPT at iter %d: %s", iterations, verdict.reason[:100])
+                            return AgentResult(
+                                output=text,
+                                iterations=iterations,
+                                termination_reason="done",
+                                action_history=action_history,
+                            )
+                        else:
+                            logger.info("  Judge REJECT at iter %d: %s", iterations, verdict.reason[:100])
+                            messages.append({"role": "assistant", "content": text or "I'm done."})
+                            messages.append({"role": "user", "content": (
+                                "You haven't completed the task yet. "
+                                "Continue working on the issue — use tools to make progress."
+                            )})
+                            continue
+                    else:
+                        return AgentResult(
+                            output=text,
+                            iterations=iterations,
+                            termination_reason="done",
+                            action_history=action_history,
+                        )
+
                 for tool_call in response.tool_calls:
                     action = self._actions_by_name.get(tool_call.name)
                     if action is None:
