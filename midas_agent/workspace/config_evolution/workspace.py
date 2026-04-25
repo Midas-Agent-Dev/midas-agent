@@ -184,14 +184,20 @@ class ConfigEvolutionWorkspace(Workspace):
                 if not self._is_default_config() and self._system_llm:
                     from midas_agent.workspace.config_evolution.failure_analyzer import FailureAnalyzer
                     analyzer = FailureAnalyzer(self._system_llm)
-                    step_ids = [s.id for s in self._workflow_config.steps]
+                    step_ids = [str(s.id) for s in self._workflow_config.steps]
                     analysis = analyzer.analyze(
-                        issue_summary=self._last_issue.description[:500],
-                        trace=full_trace[:3000],
+                        issue_summary=self._last_issue.description,
+                        trace=full_trace,
                         step_ids=step_ids,
+                        gold_test_names=self._last_issue.fail_to_pass or None,
+                        patch=self._last_patch or None,
+                        test_output=getattr(self, "_last_test_output", None),
                     )
                     if analysis:
-                        failure_reason = f"[{analysis.step_id}] {analysis.lesson}"
+                        failure_reason = (
+                            f"[{analysis.step_id}] {analysis.mistake} "
+                            f"— Lesson: {analysis.lesson}"
+                        )
                         logger.info(
                             "Workspace %s: failure analysis — %s",
                             self.workspace_id, failure_reason,

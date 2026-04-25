@@ -19,6 +19,18 @@ a GitHub issue but the gold-standard test failed (score=0).
 ## Agent trace (condensed)
 {trace}
 
+<<<<<<< HEAD
+=======
+## What the agent actually changed (str_replace edits)
+{patch_summary}
+
+## Gold test that failed
+{gold_test_info}
+
+## Gold test output (what the test actually checked)
+{test_output}
+
+>>>>>>> 860a91e (Wire gold test output into failure analyzer)
 ## Task
 1. Which step went wrong? Choose from: {step_ids}
 2. What is the ABSTRACT lesson? Do NOT include issue-specific details \
@@ -57,6 +69,12 @@ class FailureAnalyzer:
         issue_summary: str,
         trace: str,
         step_ids: list[str],
+<<<<<<< HEAD
+=======
+        gold_test_names: list[str] | None = None,
+        patch: str | None = None,
+        test_output: str | None = None,
+>>>>>>> 860a91e (Wire gold test output into failure analyzer)
     ) -> FailureAnalysis | None:
         """Analyze a failed trace and return the step that failed + abstract lesson.
 
@@ -64,6 +82,7 @@ class FailureAnalyzer:
             issue_summary: brief description of the issue (first 200 chars)
             trace: condensed execution trace
             step_ids: list of step IDs in the DAG config
+<<<<<<< HEAD
 
         Returns:
             FailureAnalysis or None if analysis fails
@@ -71,6 +90,33 @@ class FailureAnalyzer:
         prompt = FAILURE_ANALYSIS_PROMPT.format(
             issue_summary=issue_summary[:500],
             trace=trace[:3000],
+=======
+            gold_test_names: FAIL_TO_PASS test names from SWE-bench
+            patch: the agent's actual git diff (if available)
+            test_output: SWE-bench test output showing what failed and why
+        """
+        rich_trace = _build_rich_trace(trace)
+        patch_summary = _extract_patch_summary(trace)
+
+        # Build gold test info
+        if gold_test_names:
+            gold_test_info = "Tests that must pass: " + ", ".join(gold_test_names)
+        else:
+            gold_test_info = "(gold test names not available)"
+
+        if patch:
+            gold_test_info += f"\n\nAgent's patch:\n{patch[:2000]}"
+
+        # Gold test output — shows exactly what the test asserted and why it failed
+        test_output_section = test_output[:3000] if test_output else "(test output not available)"
+
+        prompt = FAILURE_ANALYSIS_PROMPT.format(
+            issue_summary=issue_summary[:1000],
+            trace=rich_trace,
+            patch_summary=patch_summary,
+            gold_test_info=gold_test_info,
+            test_output=test_output_section,
+>>>>>>> 860a91e (Wire gold test output into failure analyzer)
             step_ids=", ".join(step_ids),
         )
 

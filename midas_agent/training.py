@@ -580,6 +580,12 @@ def run_training(
                     if r:
                         adaptive_ctrl.record_episode(ws.workspace_id, r.s_exec)
 
+                # Pass test output to workspaces for failure analysis
+                scorer = getattr(scheduler._evaluation_module, "_execution_scorer", None)
+                if scorer and hasattr(scorer, "last_test_output"):
+                    for ws in workspaces:
+                        ws._last_test_output = scorer.last_test_output
+
                 # Check if any workspace's GEPA changed its config
                 gepa_changes = {
                     ws.workspace_id: getattr(ws, "_last_gepa_changed", False)
