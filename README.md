@@ -18,30 +18,14 @@ Over episodes, the DAG prompts evolve from generic instructions into battle-test
 
 ### 1. Training Loop (per issue)
 
-Each episode takes one SWE-bench issue and runs it through the current DAG config:
-
-```mermaid
-flowchart LR
-    subgraph episode["Episode (one issue)"]
-        direction LR
-        A["Issue<br/>from SWE-bench"] --> B["ConfigMerger<br/><i>embed issue into<br/>step prompts</i>"]
-        B --> C["DAG Executor<br/><i>step 1 → step 2 → ... → step N</i><br/><i>StepJudge validates each</i>"]
-        C --> D["Patch"]
-        D --> E["SWE-bench<br/>Scorer"]
-        E --> F{pass?}
-        F -->|"score=1"| G["Record<br/>success trace"]
-        F -->|"score=0"| H["Record failure<br/>trace + patch +<br/>gold test names"]
-    end
-
-    style A fill:#0d1117,stroke:#58a6ff,color:#fff
-    style B fill:#0d1117,stroke:#58a6ff,color:#fff
-    style C fill:#0d1117,stroke:#58a6ff,color:#fff
-    style D fill:#0d1117,stroke:#58a6ff,color:#fff
-    style E fill:#0d1117,stroke:#58a6ff,color:#fff
-    style F fill:#0d1117,stroke:#f0883e,color:#fff
-    style G fill:#0d1117,stroke:#3fb950,color:#fff
-    style H fill:#0d1117,stroke:#f85149,color:#fff
 ```
+Issue → ConfigMerger → DAG Executor → Patch → SWE-bench Scorer → Record Trace
+                           │
+                    step 1 → step 2 → ... → step N
+                    (StepJudge validates each transition)
+```
+
+For each SWE-bench issue, `ConfigMerger` embeds the issue into the DAG step prompts. The agent executes each step in sequence — when it stops calling tools and produces text, `StepJudge` validates the claim and advances to the next step. The resulting patch is scored by SWE-bench. Both successes and failures are recorded with their full traces.
 
 ### 2. Config Evolution (every N episodes)
 
