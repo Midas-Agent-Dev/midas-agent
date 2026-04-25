@@ -1,15 +1,63 @@
 # Midas Agent
 
-Budget-driven multi-agent training engine for LLM coding agents. Evolves workflow configurations on SWE-bench Verified through efficiency-based selection.
+Budget-driven training engine that evolves coding agent workflows on SWE-bench. Selects configurations by **eta = Score / Cost**, trains through failure-driven reflection (GEPA), and adapts multi-step DAG workflows over time.
 
-| Feature | Description |
-|---------|-------------|
-| **Efficiency Selection** | Selects by `eta = S / C` (score / cost), not just accuracy |
-| **Config Evolution** | Evolves DAG workflow configs via DSPy GEPA prompt optimization |
-| **Goal-Driven Merge** | Embeds issue context into step prompts with per-step goal tracking |
-| **Multi-Workspace** | Parallel competing workspaces with eviction and reproduction |
-| **Checkpoint & Resume** | Per-episode checkpoints, crash-safe, resume from any point |
-| **SWE-bench Ready** | Outputs `all_preds.jsonl` and reasoning traces for leaderboard submission |
+## Architecture
+
+<p align="center">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 340" width="720" height="340" font-family="system-ui, sans-serif" font-size="13">
+  <!-- Boxes -->
+  <rect x="260" y="10" width="200" height="44" rx="8" fill="#1a1a2e" stroke="#e94560" stroke-width="2"/>
+  <text x="360" y="37" text-anchor="middle" fill="#fff" font-weight="bold">Training Loop</text>
+
+  <rect x="520" y="90" width="180" height="44" rx="8" fill="#1a1a2e" stroke="#0f3460" stroke-width="2"/>
+  <text x="610" y="117" text-anchor="middle" fill="#fff" font-weight="bold">DAG Executor</text>
+
+  <rect x="520" y="180" width="180" height="44" rx="8" fill="#1a1a2e" stroke="#0f3460" stroke-width="2"/>
+  <text x="610" y="207" text-anchor="middle" fill="#fff" font-weight="bold">SWE-bench Scorer</text>
+
+  <rect x="260" y="270" width="200" height="44" rx="8" fill="#1a1a2e" stroke="#e94560" stroke-width="2"/>
+  <text x="360" y="297" text-anchor="middle" fill="#fff" font-weight="bold">Failure Analyzer</text>
+
+  <rect x="20" y="180" width="180" height="44" rx="8" fill="#1a1a2e" stroke="#e94560" stroke-width="2"/>
+  <text x="110" y="207" text-anchor="middle" fill="#fff" font-weight="bold">GEPA Reflector</text>
+
+  <rect x="20" y="90" width="180" height="44" rx="8" fill="#1a1a2e" stroke="#16c79a" stroke-width="2"/>
+  <text x="110" y="117" text-anchor="middle" fill="#fff" font-weight="bold">Adaptive Workspace</text>
+
+  <!-- Arrows -->
+  <defs><marker id="ah" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6Z" fill="#888"/></marker></defs>
+
+  <path d="M460,40 Q520,40 520,90" fill="none" stroke="#888" stroke-width="1.5" marker-end="url(#ah)"/>
+  <path d="M610,134 L610,180" fill="none" stroke="#888" stroke-width="1.5" marker-end="url(#ah)"/>
+  <path d="M520,202 Q360,240 360,270" fill="none" stroke="#888" stroke-width="1.5" marker-end="url(#ah)"/>
+  <path d="M260,292 Q110,292 110,224" fill="none" stroke="#888" stroke-width="1.5" marker-end="url(#ah)"/>
+  <path d="M110,180 L110,134" fill="none" stroke="#888" stroke-width="1.5" marker-end="url(#ah)"/>
+  <path d="M200,100 Q260,70 260,40" fill="none" stroke="#888" stroke-width="1.5" marker-end="url(#ah)"/>
+
+  <!-- Labels on arrows -->
+  <text x="510" y="68" fill="#aaa" font-size="11">clone + run</text>
+  <text x="620" y="163" fill="#aaa" font-size="11">score</text>
+  <text x="420" y="255" fill="#aaa" font-size="11">fail traces</text>
+  <text x="140" y="260" fill="#aaa" font-size="11">lessons</text>
+  <text x="65" y="163" fill="#aaa" font-size="11">new config</text>
+  <text x="180" y="58" fill="#aaa" font-size="11">champion</text>
+</svg>
+</p>
+
+```
+Scheduler ──► Workspace(s) ──► ReactAgent ──► Docker (SWE-bench)
+                 │
+         DAG: localize → investigate → fix → validate
+```
+
+### Three Layers
+
+| Layer | Role |
+|-------|------|
+| **Scheduler** | Episode loop, budget allocation, checkpoint/resume |
+| **Workspace** | Config evolution, DAG merge, GEPA reflection, adaptive selection |
+| **ReactAgent** | Tool-calling agent (bash, str_replace_editor). Text response = done signal |
 
 ## Quick Start
 
@@ -26,137 +74,65 @@ EOF
 # Train on SWE-bench Verified
 midas train --config train_config_evolution.yaml --train-dir my-run
 
-# Resume after crash
-midas train --resume .midas/train/my-run/
-
-# Inference
-midas infer --artifact .midas/agents/graph_emergence_artifact.json
-```
-
-## Training Config
-
-```yaml
-initial_budget: 500000        # tokens per workspace per episode
-workspace_count: 3            # parallel competing workspaces
-n_evict: 2                    # evict worst N per episode
-runtime_mode: config_evolution
-multiplier_mode: adaptive     # adaptive budget scaling
-mult_max: 2.5                 # max budget multiplier
-beta: 0.3                     # LLM judge weight
-execution_env: docker         # SWE-bench Docker containers
-max_tool_output_chars: 100000
-max_context_tokens: 32000
-```
-
-## CLI Reference
-
-```bash
-# Fresh training (all 500 SWE-bench Verified issues)
-midas train --config train_config_evolution.yaml
-
-# Train on first N issues
+# Train first N issues only
 midas train --config train_config_evolution.yaml --issues 30
 
-# Train single issue by index
-midas train --config train_config_evolution.yaml --issue-index 0
+# Resume from checkpoint
+midas train --resume .midas/train/my-run/
 
-# Custom training directory
-midas train --config train_config_evolution.yaml --train-dir experiment-1
+# Inference (interactive TUI)
+midas infer --dag config.yaml
 
-# Resume latest checkpoint
-midas train --resume
-
-# Resume specific run
-midas train --resume .midas/train/experiment-1/
-
-# Force fresh start (ignore checkpoint)
-midas train --config train_config_evolution.yaml --fresh
-
-# Inference with trained artifact
-midas infer --model openrouter/qwen/qwen3-coder-30b-a3b-instruct
+# Inference (eval on SWE-bench, frozen config)
+midas infer --dag config.yaml --issues 50
 ```
+
+## How Training Works
+
+1. **Episode 1** -- Single-step ReactAgent solves an issue. On first success, `ConfigCreator` generates a multi-step DAG from the trace.
+
+2. **Episodes 2+** -- `ConfigMerger` embeds each new issue into the DAG step prompts. `StepJudge` validates step completion (trust-based). Agent terminates by producing text (no `task_done` tool).
+
+3. **Every N failures** -- GEPA triggers:
+   - `FailureAnalyzer` extracts abstract lessons from failed traces (sees full trace + patch + gold test names)
+   - `ConfigReflector` proposes a new whole-config from success + failure traces
+   - Lessons condensed into prompts (no prompt inflation)
+
+4. **Adaptive Workspaces** -- New config enters head-to-head against the champion. Winner selected by total issues solved. Both traces feed the next reflection cycle.
+
+## Key Features
+
+- **eta = S/C selection** -- efficiency-driven workspace competition
+- **DAG workflows** -- multi-step plans (localize, investigate, fix, validate) that evolve
+- **Failure-driven evolution (GEPA)** -- real execution outcomes, not proxy metrics
+- **Adaptive workspaces** -- champion vs challenger head-to-head on identical issues
+- **No task_done tool** -- text response = termination; unknown tool calls treated as done
+- **ConfigMerger** -- embeds issue into step prompts (prevents overscoping), repairs structure via grafting
+- **Checkpoint & resume** -- crash-safe, per-episode checkpoints
+- **SWE-bench compatible** -- outputs `all_preds.jsonl` + traces for leaderboard submission
 
 ## Training Output
 
 ```
-.midas/train/<run-name>/
-├── checkpoint.json            # Resume metadata
-├── train_config.yaml          # Saved training config
-├── all_preds.jsonl            # SWE-bench submission format
-├── data/                      # Successful execution traces (GEPA dataset)
-├── trajs/                     # Per-issue reasoning traces
+.midas/train/<run>/
+├── checkpoint.json         # Resume metadata
+├── train_config.yaml       # Saved config
+├── all_preds.jsonl         # SWE-bench submission format
+├── data/                   # Execution traces (GEPA dataset)
+├── trajs/                  # Per-issue reasoning traces
 └── log/
-    ├── configs/               # DAG config YAML per episode
-    ├── action_logs/           # JSONL action logs per workspace
-    ├── patches/               # Git patches per workspace
-    └── best_config.yaml       # Best-eta config at training end
+    ├── configs/            # DAG YAML per episode
+    ├── action_logs/        # JSONL action logs
+    ├── patches/            # Git patches
+    └── best_config.yaml    # Best config at training end
 ```
-
-## Architecture
-
-```
-Scheduler          Budget allocation, eta-based selection, eviction
-  |
-Workspace(s)       Config Evolution: DAG creation, merge, GEPA optimization
-  |
-ReactAgent         Tool-calling agent loop (bash, str_replace_editor, task_done)
-  |
-Docker             SWE-bench container per workspace per episode
-```
-
-### Episode Loop
-
-1. Clone repo at base commit
-2. Allocate budgets (proportional to eta)
-3. Execute all workspaces in parallel (Docker containers)
-4. Submit patches
-5. Evaluate (SWE-bench execution scorer + LLM judge)
-6. Post-episode (config creation / GEPA optimization)
-7. Evict worst workspaces, seed replacements from best-eta config
-8. Save checkpoint + SWE-bench artifacts
-
-### Config Evolution Pipeline
-
-```
-Episode 1:  Single-step agent solves issue
-            -> Config creation (trace -> summary -> DAG YAML)
-
-Episode 2+: Base DAG + issue -> ConfigMerger -> merged DAG (per-episode)
-            -> Execute merged DAG in Docker
-            -> Record successful traces
-
-Every 5 successes: GEPA optimizes base DAG prompts
-            -> LLM-as-judge metric on successful traces
-            -> Pareto selection (accuracy + brevity)
-            -> Holdout regression check
-            -> Prompt condensation if oversized
-```
-
-## SWE-bench Submission
-
-Training outputs `all_preds.jsonl` and `trajs/` compatible with the [swe-bench/experiments](https://github.com/swe-bench/experiments) submission format.
-
-```bash
-# After training completes
-cp .midas/train/my-run/all_preds.jsonl evaluation/verified/midas_agent/
-cp -r .midas/train/my-run/trajs/ evaluation/verified/midas_agent/trajs/
-# Add metadata.yaml and README.md per swe-bench checklist
-# Submit PR to swe-bench/experiments
-```
-
-## Model Support
-
-Tested with:
-- `openrouter/qwen/qwen3-coder-30b-a3b-instruct`
-- `openrouter/minimax/minimax-m2.5`
-
-Any LiteLLM-compatible model works. Configure in `.midas/config.yaml`.
 
 ## Requirements
 
 - Python 3.11+
-- Docker (for SWE-bench execution)
+- Docker (SWE-bench execution)
 - Poetry
+- Any [LiteLLM](https://docs.litellm.ai/)-compatible model
 
 ## License
 
