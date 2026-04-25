@@ -50,7 +50,7 @@ The gold tests are the key. When an agent fails, the Failure Analyzer sees the f
 
 These lessons feed into the Config Reflector, which rewrites the DAG prompts. Not by appending a list of tips, but by integrating the lessons into the step instructions naturally. The new config is then validated head-to-head against the current one on fresh issues — the winner survives into the next cycle.
 
-The reflection approach is inspired by [GEPA](https://dspy.ai/) (Guided Evolutionary Prompt Adaptation) from DSPy — a Pareto-frontier-based prompt optimizer that mutates prompts via LLM reflection and selects candidates that improve on a holdout set. Midas adapts this idea to whole-config optimization: instead of optimizing individual prompts against a proxy metric, it reflects on real execution traces (successes and failures with gold-standard feedback) and proposes improved configs validated through head-to-head competition.
+The reflection approach is inspired by [GEPA](https://arxiv.org/abs/2506.08056) (Guided Evolutionary Prompt Adaptation), a Pareto-frontier-based prompt optimizer implemented in [DSPy](https://dspy.ai/) that mutates prompts via LLM reflection and selects candidates that improve on a holdout set. Midas adapts this idea to whole-config optimization: instead of optimizing individual prompts against a proxy metric, it reflects on real execution traces (successes and failures with gold-standard feedback) and proposes improved configs validated through head-to-head competition.
 
 ## Quick Start
 
