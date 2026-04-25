@@ -33,7 +33,7 @@ Over episodes, the DAG prompts evolve from generic instructions into battle-test
   <!-- 2. DAG Executor -->
   <rect x="560" y="110" width="220" height="70" rx="10" fill="#1a1a2e" stroke="#0f3460" stroke-width="2"/>
   <text x="670" y="135" text-anchor="middle" fill="#fff" font-weight="bold">DAG Executor</text>
-  <text x="670" y="153" text-anchor="middle" fill="#aaa" font-size="10">localize → investigate → fix → validate</text>
+  <text x="670" y="153" text-anchor="middle" fill="#aaa" font-size="10">multi-step DAG (generated from first success)</text>
   <text x="670" y="168" text-anchor="middle" fill="#aaa" font-size="10">StepJudge validates each transition</text>
 
   <!-- 3. SWE-bench Scorer -->
@@ -88,7 +88,7 @@ Over episodes, the DAG prompts evolve from generic instructions into battle-test
 | Step | What happens |
 |------|-------------|
 | **Train** | Pick an issue, merge it into the DAG step prompts, run in Docker |
-| **Execute** | Agent follows DAG steps. Text response = step done. StepJudge validates. |
+| **Execute** | Agent follows generated DAG steps. Text response = step done. StepJudge validates. |
 | **Score** | SWE-bench runs gold tests. Pass (1.0) or fail (0.0). |
 | **Analyze** | On failure: LLM sees full trace + agent's patch + gold test names. Identifies which step failed and extracts an abstract lesson. |
 | **Reflect** | Every N episodes: ConfigReflector sees all success + failure traces. Rewrites DAG prompts — lessons are condensed in, not appended. |
