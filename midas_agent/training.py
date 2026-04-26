@@ -608,17 +608,44 @@ def run_training(
                     result = adaptive_ctrl.on_gepa_result(champ_changed, chall_changed)
 
                     if result["action"] == "start_h2h":
-                        # Create a challenger workspace with the champion's NEW config
-                        new_id = f"ws-challenger-{global_idx}"
-                        best_config = scheduler._get_best_config()
-                        scheduler._workspace_manager.replace(
-                            champ_id, champ_id, best_config,
-                        ) if False else None  # champion keeps its config
-                        ws_new = scheduler._workspace_manager.create(new_id, best_config)
-                        adaptive_ctrl.start_head_to_head(new_id)
+                        # Find the candidate config from the workspace that changed
+                        candidate_config = None
+                        for ws in workspaces:
+                            candidate = getattr(ws, "_gepa_candidate_config", None)
+                            if candidate is not None:
+                                candidate_config = candidate
+                                break
+
+                        if candidate_config is not None:
+                            # Champion keeps its CURRENT config (unchanged).
+                            # Challenger gets the GEPA candidate config.
+                            from midas_agent.workspace.config_evolution.mutator import _config_to_yaml
+                            import yaml as _yaml
+                            candidate_dict = _yaml.safe_load(_config_to_yaml(candidate_config))
+
+                            new_id = f"ws-challenger-{global_idx}"
+                            ws_new = scheduler._workspace_manager.create(new_id, candidate_dict)
+                            adaptive_ctrl.start_head_to_head(new_id)
+                            logger.info("  Adaptive: challenger %s gets GEPA candidate config", new_id)
+                        else:
+                            logger.warning("  Adaptive: GEPA changed but no candidate config found")
 
                     elif result["action"] == "select_winner":
+                        winner_id = result.get("winner_id")
                         loser_id = result.get("loser_id")
+
+                        # If challenger won, adopt its config for the champion
+                        if winner_id and winner_id != champ_id:
+                            winner_ws = next(
+                                (w for w in workspaces if w.workspace_id == winner_id), None
+                            )
+                            champ_ws = next(
+                                (w for w in workspaces if w.workspace_id == champ_id), None
+                            )
+                            if winner_ws and champ_ws:
+                                champ_ws._workflow_config = winner_ws._workflow_config
+                                logger.info("  Adaptive: champion adopted challenger's config")
+
                         if loser_id:
                             scheduler._workspace_manager.destroy(loser_id)
                             logger.info("  Adaptive: removed loser %s", loser_id)

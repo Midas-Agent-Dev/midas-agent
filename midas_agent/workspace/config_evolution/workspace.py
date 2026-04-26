@@ -246,13 +246,20 @@ class ConfigEvolutionWorkspace(Workspace):
             # enough data has accumulated).  Skip for the default
             # single-step config — it awaits config creation on first
             # success, not incremental mutation.
+            #
+            # IMPORTANT: do NOT apply the new config here. Store it as
+            # a candidate for the adaptive workspace head-to-head.
+            # The training loop creates a challenger with the candidate
+            # while the champion keeps its current config.
             self._last_gepa_changed = False
+            self._gepa_candidate_config = None
             if not self._is_default_config():
                 new_config, changed = self._prompt_optimizer.maybe_optimize(
                     self._workflow_config,
                 )
-                self._workflow_config = new_config
-                self._last_gepa_changed = changed
+                if changed:
+                    self._gepa_candidate_config = new_config
+                    self._last_gepa_changed = True
             # else: keep current config as-is (default config)
 
         # -- Save snapshot for export --
