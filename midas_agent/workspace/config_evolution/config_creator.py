@@ -150,18 +150,22 @@ class ConfigCreator:
             tool_usage_summary=tool_summary,
         )
 
-        try:
-            resp = self._system_llm(
-                LLMRequest(messages=[{"role": "user", "content": summarize_prompt}],
-                           model="default"),
-            )
-        except Exception as e:
-            logger.warning("Config creation pass 1 failed: %s", e)
-            return None
+        summary = ""
+        for attempt in range(3):
+            try:
+                resp = self._system_llm(
+                    LLMRequest(messages=[{"role": "user", "content": summarize_prompt}],
+                               model="default"),
+                )
+                summary = (resp.content or "").strip()
+                if summary:
+                    break
+                logger.warning("Config creation pass 1 returned empty (attempt %d/3)", attempt + 1)
+            except Exception as e:
+                logger.warning("Config creation pass 1 API error (attempt %d/3): %s", attempt + 1, e)
 
-        summary = (resp.content or "").strip()
         if not summary:
-            logger.warning("Config creation pass 1 returned empty summary")
+            logger.warning("Config creation pass 1 failed after 3 attempts")
             return None
 
         logger.info("Config creation pass 1 done (%d chars)", len(summary))
@@ -184,13 +188,16 @@ class ConfigCreator:
                     LLMRequest(messages=messages, model="default"),
                 )
             except Exception as e:
-                logger.warning("Config creation pass 2 failed: %s", e)
-                return None
+                logger.warning("Config creation pass 2 API error (attempt %d/%d): %s",
+                               attempt + 1, 1 + max_retries, e)
+                continue
 
             raw_yaml = _extract_yaml(resp.content or "")
             if not raw_yaml:
-                logger.warning("Config creation pass 2 returned empty response")
-                return None
+                messages.append({"role": "assistant", "content": resp.content or ""})
+                messages.append({"role": "user", "content": "Output the YAML inside ```yaml fences."})
+                logger.info("Config creation: no YAML, retrying (attempt %d/%d)", attempt + 1, 1 + max_retries)
+                continue
 
             config = _parse_config_yaml(raw_yaml)
             if config is None:
