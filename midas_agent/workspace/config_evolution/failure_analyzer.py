@@ -80,8 +80,12 @@ class FailureAnalyzer:
         patch_section = patch[:3000] if patch else "(no patch produced)"
         test_output_section = test_output[:3000] if test_output else "(test output not available)"
 
+        # Strip HTML comments from issue description (GitHub boilerplate noise)
+        import re
+        clean_summary = re.sub(r'<!--.*?-->', '', issue_summary, flags=re.DOTALL).strip()
+
         prompt = FAILURE_ANALYSIS_PROMPT.format(
-            issue_summary=issue_summary[:1000],
+            issue_summary=clean_summary[:1000],
             patch=patch_section,
             gold_test_info=gold_test_info,
             test_output=test_output_section,
