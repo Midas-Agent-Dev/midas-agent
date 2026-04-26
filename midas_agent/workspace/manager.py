@@ -160,6 +160,11 @@ class WorkspaceManager:
             store_dir=os.path.join(self._train_dir, "log", "snapshots"),
         )
 
+        from midas_agent.workspace.config_evolution.lesson_store import LessonStore
+        lesson_store = LessonStore(
+            store_path=os.path.join(self._train_dir, "data", "lessons.json"),
+        )
+
         # Build workflow config from initial_config or use a default.
         if initial_config and "meta" in initial_config and "steps" in initial_config:
             meta_data = initial_config["meta"]
@@ -201,6 +206,7 @@ class WorkspaceManager:
             config_creator=config_creator,
             config_merger=config_merger,
             snapshot_store=snapshot_store,
+            lesson_store=lesson_store,
         )
 
     def _create_graph_emergence_workspace(

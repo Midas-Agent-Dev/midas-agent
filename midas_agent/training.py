@@ -437,15 +437,8 @@ def run_training(
 
     patches_base_dir = os.path.join(train_dir, "log", "patches")
 
-    # -- Create workspaces and adaptive controller --
-    from midas_agent.scheduler.adaptive_workspace import AdaptiveWorkspaceController
-
-    adaptive_ctrl = AdaptiveWorkspaceController() if config.adaptive_workspaces else None
+    # -- Create workspace --
     scheduler.create_workspaces()
-    if adaptive_ctrl:
-        workspaces = scheduler.get_workspaces()
-        if workspaces:
-            adaptive_ctrl.init_champion(workspaces[0].workspace_id)
 
     # -- Resume from checkpoint if available --
     processed_issue_ids: list[str] = []
@@ -497,13 +490,6 @@ def run_training(
 
         # Filter out already-processed issues
         issues = [i for i in issues if i.issue_id not in processed_ids_set]
-        # Restore adaptive controller state
-        if adaptive_ctrl and "adaptive_controller" in checkpoint:
-            from midas_agent.scheduler.adaptive_workspace import AdaptiveWorkspaceController
-            adaptive_ctrl = AdaptiveWorkspaceController.from_dict(
-                checkpoint["adaptive_controller"]
-            )
-
         logger.info(
             "Resumed from checkpoint: %d episodes done, %d remaining",
             len(processed_issue_ids), len(issues),
@@ -572,86 +558,11 @@ def run_training(
             for ws in workspaces:
                 ws.post_episode(eval_results_dict, evicted_ids=evicted)
 
-            # 7. Adaptive workspace management or fixed eviction
-            if adaptive_ctrl:
-                # Record η for each workspace
+            # 7. Pass test output to workspaces for failure analysis
+            scorer = getattr(scheduler._evaluation_module, "_execution_scorer", None)
+            if scorer and hasattr(scorer, "last_test_output"):
                 for ws in workspaces:
-                    r = eval_results.get(ws.workspace_id)
-                    if r:
-                        adaptive_ctrl.record_episode(ws.workspace_id, r.s_exec)
-
-                # Pass test output to workspaces for failure analysis
-                scorer = getattr(scheduler._evaluation_module, "_execution_scorer", None)
-                if scorer and hasattr(scorer, "last_test_output"):
-                    for ws in workspaces:
-                        ws._last_test_output = scorer.last_test_output
-
-                # Check if any workspace's GEPA changed its config
-                gepa_changes = {
-                    ws.workspace_id: getattr(ws, "_last_gepa_changed", False)
-                    for ws in workspaces
-                }
-                any_gepa_ran = any(gepa_changes.values()) or any(
-                    getattr(ws, "_prompt_optimizer", None)
-                    and not getattr(ws, "_prompt_optimizer").should_optimize()
-                    and getattr(ws, "_prompt_optimizer")._episodes_since_last_optimization == 0
-                    for ws in workspaces
-                )
-
-                if any_gepa_ran:
-                    champ_id = adaptive_ctrl.champion_stats.workspace_id if adaptive_ctrl.champion_stats else None
-                    chall_id = adaptive_ctrl.challenger_stats.workspace_id if adaptive_ctrl.challenger_stats else None
-
-                    champ_changed = gepa_changes.get(champ_id, False)
-                    chall_changed = gepa_changes.get(chall_id, False) if chall_id else None
-
-                    result = adaptive_ctrl.on_gepa_result(champ_changed, chall_changed)
-
-                    if result["action"] == "start_h2h":
-                        # Find the candidate config from the workspace that changed
-                        candidate_config = None
-                        for ws in workspaces:
-                            candidate = getattr(ws, "_gepa_candidate_config", None)
-                            if candidate is not None:
-                                candidate_config = candidate
-                                break
-
-                        if candidate_config is not None:
-                            # Champion keeps its CURRENT config (unchanged).
-                            # Challenger gets the GEPA candidate config.
-                            from midas_agent.workspace.config_evolution.mutator import _config_to_yaml
-                            import yaml as _yaml
-                            candidate_dict = _yaml.safe_load(_config_to_yaml(candidate_config))
-
-                            new_id = f"ws-challenger-{global_idx}"
-                            ws_new = scheduler._workspace_manager.create(new_id, candidate_dict)
-                            adaptive_ctrl.start_head_to_head(new_id)
-                            logger.info("  Adaptive: challenger %s gets GEPA candidate config", new_id)
-                        else:
-                            logger.warning("  Adaptive: GEPA changed but no candidate config found")
-
-                    elif result["action"] == "select_winner":
-                        winner_id = result.get("winner_id")
-                        loser_id = result.get("loser_id")
-
-                        # If challenger won, adopt its config for the champion
-                        if winner_id and winner_id != champ_id:
-                            winner_ws = next(
-                                (w for w in workspaces if w.workspace_id == winner_id), None
-                            )
-                            champ_ws = next(
-                                (w for w in workspaces if w.workspace_id == champ_id), None
-                            )
-                            if winner_ws and champ_ws:
-                                champ_ws._workflow_config = winner_ws._workflow_config
-                                logger.info("  Adaptive: champion adopted challenger's config")
-
-                        if loser_id:
-                            scheduler._workspace_manager.destroy(loser_id)
-                            logger.info("  Adaptive: removed loser %s", loser_id)
-            else:
-                # Fixed eviction mode
-                scheduler.replace_evicted()
+                    ws._last_test_output = scorer.last_test_output
 
             # 8. Save SWE-bench submission artifacts
             _save_swebench_artifacts(
@@ -662,7 +573,7 @@ def run_training(
             processed_issue_ids.append(issue.issue_id)
             _save_checkpoint(
                 train_dir, global_idx, processed_issue_ids,
-                workspaces, scheduler, adaptive_ctrl,
+                workspaces, scheduler,
             )
 
         finally:

@@ -434,49 +434,6 @@ class GEPAConfigOptimizer:
             and len(self._traces) >= 1
         )
 
-    def maybe_optimize(self, config: WorkflowConfig) -> tuple[WorkflowConfig, bool]:
-        """Run reflection if conditions met, otherwise return config as-is."""
-        if not self.should_optimize():
-            return config, False
-        new_config = self.optimize(config)
-        changed = new_config is not config
-        return new_config, changed
-
-    def optimize(self, config: WorkflowConfig) -> WorkflowConfig:
-        """Run whole-config reflection using real execution traces.
-
-        Uses ConfigReflector to propose an improved config based on
-        both success and failure traces. No proxy metric — the signal
-        is real pass/fail outcomes.
-        """
-        if not self._traces:
-            logger.info("GEPA: no traces, skipping")
-            return config
-
-        # Bias toward recent traces (last window_size)
-        recent = self._traces[-self._dataset._max_window:]
-        n_success = sum(1 for t in recent if t["score"] >= 1.0)
-        n_failure = sum(1 for t in recent if t["score"] < 1.0)
-
-        logger.info(
-            "GEPA reflection starting: %d traces (%d success, %d failure)",
-            len(recent), n_success, n_failure,
-        )
-
-        from midas_agent.workspace.config_evolution.config_reflector import ConfigReflector
-        reflector = ConfigReflector(self._system_llm)
-        new_config = reflector.reflect(config, recent)
-
-        self._episodes_since_last_optimization = 0
-
-        if new_config is not None:
-            # Validate
-            errors = validate_config(new_config)
-            if errors:
-                logger.warning("GEPA: reflected config failed validation (%s), keeping original", errors)
-                return config
-            logger.info("GEPA: reflection produced new config")
-            return new_config
-        else:
-            logger.info("GEPA: reflection produced no changes")
-            return config
+    # NOTE: maybe_optimize() and optimize() removed.
+    # Config evolution now uses LessonStore (ExpeL-style retrieval)
+    # instead of ConfigReflector-based prompt rewriting.

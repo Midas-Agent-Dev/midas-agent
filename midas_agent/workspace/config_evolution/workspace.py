@@ -35,6 +35,7 @@ class ConfigEvolutionWorkspace(Workspace):
         config_creator: ConfigCreator,
         config_merger: ConfigMerger,
         snapshot_store: ConfigSnapshotStore,
+        lesson_store=None,
     ) -> None:
         super().__init__(workspace_id, call_llm, system_llm)
         self._workflow_config = workflow_config
@@ -45,9 +46,11 @@ class ConfigEvolutionWorkspace(Workspace):
         self._config_creator = config_creator
         self._config_merger = config_merger
         self._snapshot_store = snapshot_store
+        self._lesson_store = lesson_store
         self._budget = 0
         self._last_result: ExecutionResult | None = None
         self._last_issue: Issue | None = None
+        self._last_retrieved_lesson_ids: list[str] = []
         self._episode_count = 0
         self._io = None  # Set by training.py for Docker execution mode
 
@@ -89,13 +92,21 @@ class ConfigEvolutionWorkspace(Workspace):
         # Merge issue context into step prompts for multi-step DAGs.
         # Single-step (default) configs pass issue via ReactAgent context.
         exec_config = self._workflow_config
+        self._last_retrieved_lesson_ids = []
         if not self._is_default_config():
+            # Retrieve relevant lessons from past failures
+            retrieved_lessons = []
+            if self._lesson_store and len(self._lesson_store) > 0:
+                retrieved_lessons = self._lesson_store.retrieve(issue.description)
+                self._last_retrieved_lesson_ids = [l.lesson_id for l in retrieved_lessons]
+
             exec_config = self._config_merger.merge(
-                self._workflow_config, issue,
+                self._workflow_config, issue, lessons=retrieved_lessons or None,
             )
             logger.info(
-                "Workspace %s: merged issue '%s' into %d-step config",
+                "Workspace %s: merged issue '%s' into %d-step config (%d lessons)",
                 self.workspace_id, issue.issue_id, len(exec_config.steps),
+                len(retrieved_lessons),
             )
 
         self._last_result = self._dag_executor.execute(
@@ -179,7 +190,7 @@ class ConfigEvolutionWorkspace(Workspace):
                     issue_id=self._last_issue.issue_id,
                 )
             else:
-                # Analyze failure and record with reason
+                # Analyze failure → store lesson in lesson store
                 failure_reason = None
                 if not self._is_default_config() and self._system_llm:
                     from midas_agent.workspace.config_evolution.failure_analyzer import FailureAnalyzer
@@ -201,7 +212,18 @@ class ConfigEvolutionWorkspace(Workspace):
                             "Workspace %s: failure analysis — %s",
                             self.workspace_id, failure_reason,
                         )
+                        # Store lesson for retrieval on future issues
+                        if self._lesson_store:
+                            self._lesson_store.add_lesson(
+                                issue_id=self._last_issue.issue_id,
+                                issue_summary=self._last_issue.description,
+                                step_id=analysis.step_id,
+                                mistake=analysis.mistake,
+                                lesson=analysis.lesson,
+                                patch=self._last_patch or "",
+                            )
 
+                # Record failure trace for data persistence
                 self._prompt_optimizer.record_failure(
                     task_input=self._last_issue.description,
                     action_summary=full_trace,
@@ -209,6 +231,13 @@ class ConfigEvolutionWorkspace(Workspace):
                     failure_reason=failure_reason,
                     issue_id=self._last_issue.issue_id,
                 )
+
+        # -- Vote on retrieved lessons --
+        if self._lesson_store and self._last_retrieved_lesson_ids:
+            self._lesson_store.vote(
+                self._last_retrieved_lesson_ids,
+                upvote=(my_score >= 1.0),
+            )
 
         # -- Config creation on first success --
         # If we still have the default single-step config and this episode
@@ -233,34 +262,10 @@ class ConfigEvolutionWorkspace(Workspace):
                 )
                 return None  # survived, config upgraded
 
-        # -- Tick GEPA counter every episode (success or failure) --
-        self._prompt_optimizer.tick_episode()
-
         # -- Normal post-episode flow --
         if self.workspace_id in evicted_ids:
-            # Evicted: nothing to do.  The scheduler will replace this
-            # workspace with a new one seeded from the best-η config.
             return None
-        else:
-            # Survived: GEPA optimization (runs every N episodes when
-            # enough data has accumulated).  Skip for the default
-            # single-step config — it awaits config creation on first
-            # success, not incremental mutation.
-            #
-            # IMPORTANT: do NOT apply the new config here. Store it as
-            # a candidate for the adaptive workspace head-to-head.
-            # The training loop creates a challenger with the candidate
-            # while the champion keeps its current config.
-            self._last_gepa_changed = False
-            self._gepa_candidate_config = None
-            if not self._is_default_config():
-                new_config, changed = self._prompt_optimizer.maybe_optimize(
-                    self._workflow_config,
-                )
-                if changed:
-                    self._gepa_candidate_config = new_config
-                    self._last_gepa_changed = True
-            # else: keep current config as-is (default config)
+        # No GEPA config mutation — lessons are stored and retrieved per-issue
 
         # -- Save snapshot for export --
         self._episode_count += 1
