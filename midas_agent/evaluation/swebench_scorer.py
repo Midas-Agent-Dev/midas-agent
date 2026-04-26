@@ -75,15 +75,17 @@ class SWEBenchScorer(ExecutionScorer):
         """Read test output from SWE-bench evaluation.
 
         Prefers test_output.txt (has assertion details) over run_instance.log.
+        Searches all run_ids (not just self._run_id) and picks the most recent.
         """
         import glob
         import os
 
-        base = f"logs/run_evaluation/{self._run_id}/midas-agent/{instance_id}"
+        # Find test_output.txt across all run_ids, pick most recent
+        pattern = f"logs/run_evaluation/*/midas-agent/{instance_id}/test_output.txt"
+        matches = sorted(glob.glob(pattern), key=os.path.getmtime, reverse=True)
+        test_output_path = matches[0] if matches else None
 
-        # Try test_output.txt first — has the actual assertion failures
-        test_output_path = os.path.join(base, "test_output.txt")
-        if os.path.isfile(test_output_path):
+        if test_output_path and os.path.isfile(test_output_path):
             try:
                 with open(test_output_path) as f:
                     content = f.read()
@@ -106,10 +108,11 @@ class SWEBenchScorer(ExecutionScorer):
                 pass
 
         # Fallback to run_instance.log
-        log_path = os.path.join(base, "run_instance.log")
-        if os.path.isfile(log_path):
+        log_pattern = f"logs/run_evaluation/*/midas-agent/{instance_id}/run_instance.log"
+        log_matches = sorted(glob.glob(log_pattern), key=os.path.getmtime, reverse=True)
+        if log_matches:
             try:
-                with open(log_path) as f:
+                with open(log_matches[0]) as f:
                     return f.read()[-3000:]
             except Exception:
                 pass
