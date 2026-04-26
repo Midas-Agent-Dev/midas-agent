@@ -135,7 +135,7 @@ class LessonStore:
             step_id=step_id,
             mistake=mistake,
             lesson=lesson,
-            patch=patch[:2000],
+            patch=patch,
             importance=2,
         )
         self._lessons.append(new_lesson)
@@ -156,14 +156,10 @@ class LessonStore:
         if not self._lessons:
             return []
 
-        active = [l for l in self._lessons if l.importance > 0]
-        if not active:
-            return []
-
         query_emb = self._embed(query_text)
 
         scored = []
-        for lesson in active:
+        for lesson in self._lessons:
             lesson_emb = self._embed(lesson.issue_summary)
             sim = self._cosine_similarity(query_emb, lesson_emb)
             scored.append((sim, lesson))
@@ -179,7 +175,7 @@ class LessonStore:
         return results
 
     def vote(self, lesson_ids: list[str], upvote: bool) -> None:
-        """Upvote or downvote lessons. Prune at importance <= -4."""
+        """Upvote or downvote lessons. Prune at importance <= -10."""
         if not lesson_ids:
             return
 
@@ -194,12 +190,12 @@ class LessonStore:
                     "upvoted" if upvote else "downvoted",
                     lesson.lesson_id, lesson.importance,
                 )
-                if lesson.importance <= -4:
+                if lesson.importance <= -10:
                     pruned.append(lesson.lesson_id)
 
         if pruned:
             self._lessons = [l for l in self._lessons if l.lesson_id not in pruned]
-            logger.info("LessonStore: pruned %d lessons (importance <= -4)", len(pruned))
+            logger.info("LessonStore: pruned %d lessons (importance <= -10)", len(pruned))
 
         self.save()
 

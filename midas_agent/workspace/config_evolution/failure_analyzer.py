@@ -77,8 +77,8 @@ class FailureAnalyzer:
         else:
             gold_test_info = "(gold test names not available)"
 
-        patch_section = patch[:3000] if patch else "(no patch produced)"
-        test_output_section = test_output[:3000] if test_output else "(test output not available)"
+        patch_section = patch if patch else "(no patch produced)"
+        test_output_section = test_output if test_output else "(test output not available)"
 
         # Strip HTML comments from issue description (GitHub boilerplate noise)
         import re
