@@ -1,56 +1,60 @@
 # Midas Agent
 
-A self-improving coding agent that learns from its own failures. Given a set of GitHub issues, Midas trains a multi-step DAG workflow through a closed-loop process: solve issues, analyze failures, reflect on what went wrong, and evolve the workflow prompts — so the next batch of issues benefits from past mistakes.
+A self-improving coding agent that learns from its own failures. Given a set of GitHub issues, Midas trains a multi-step DAG workflow and builds a lesson library — so the agent avoids past mistakes on future issues.
 
 ## Motivation
 
 Most coding agents use a fixed prompt and hope for the best. When they fail, the failure is discarded. Midas closes that loop:
 
-1. The agent solves issues using a **multi-step DAG** (localize → investigate → fix → validate)
-2. Failed attempts are **analyzed** — an LLM identifies which step went wrong and extracts an abstract lesson
-3. A **reflector** rewrites the DAG prompts to incorporate those lessons
-4. The new config is **validated head-to-head** against the old one on fresh issues
-5. The winner survives. Repeat.
+1. The agent solves issues using a **generated multi-step DAG** (e.g., localize → investigate → fix → validate)
+2. Failed attempts are **analyzed** — an LLM compares the agent's patch against the gold test expectations
+3. Concrete lessons are **stored** in a lesson library with semantic embeddings
+4. On new issues, **relevant lessons are retrieved** by similarity and injected into the fix step
+5. Lessons that help get **upvoted**; lessons that don't get **downvoted** and eventually pruned
 
-Over episodes, the DAG prompts evolve from generic instructions into battle-tested guidance like *"don't edit test files"*, *"fix the error message, not the condition logic"*, *"actually change the behavior, don't just add a deprecation warning."*
+Over episodes, the lesson library accumulates battle-tested guidance like *"when fixing an error message, change the format string not the condition logic"*, *"don't just add a deprecation warning — actually change the behavior"*, *"never discard the original exception message."*
 
 ## Pipeline
 
 ### 1. Training Loop (per issue)
 
 ```
-Issue → ConfigMerger → DAG Executor → Patch → SWE-bench Scorer → Record Trace
-                           │
-                    step 1 → step 2 → ... → step N
-                    (StepJudge validates each transition)
+Issue → ConfigMerger → DAG Executor → Patch → SWE-bench Scorer → Record
+               │              │
+        embed issue     step 1 → step 2 → ... → step N
+        + inject lessons   (StepJudge validates each transition)
 ```
 
-For each SWE-bench issue, `ConfigMerger` embeds the issue into the DAG step prompts. The agent executes each step in sequence — when it stops calling tools and produces text, `StepJudge` validates the claim and advances to the next step. The resulting patch is scored by SWE-bench. Both successes and failures are recorded with their full traces.
+For each SWE-bench issue, `ConfigMerger` embeds the issue into the DAG step prompts and injects relevant lessons from past failures. The agent executes each step in sequence — when it stops calling tools and produces text, `StepJudge` validates the claim and advances to the next step.
 
-### 2. Config Evolution (every N episodes)
+### 2. Learning from Failures
 
 ```mermaid
 flowchart LR
     GS["<b>Gold Tests</b><br/><i>SWE-bench ground truth</i>"] --> FA
-    FA["<b>Failure Analyzer</b><br/><i>what did the agent do?</i><br/><i>what did the gold test expect?</i><br/><i>→ abstract lesson</i>"] -->|"lessons + traces"| CR
-    CR["<b>Config Reflector</b><br/><i>rewrites DAG prompts</i><br/><i>based on lessons learned</i>"] -->|"candidate config"| HH
-    HH["<b>Head-to-Head</b><br/><i>old config vs new config</i><br/><i>on same future issues</i>"] -->|"winner"| DA
-    DA["<b>DAG Agent</b><br/><i>runs next N issues</i>"] -->|"trace + patch"| SC
-    SC["<b>SWE-bench Scorer</b>"] -->|"pass or fail"| FA
+    FA["<b>Failure Analyzer</b><br/><i>compares patch vs gold test</i><br/><i>expectations</i>"] -->|"lesson"| LS
+    LS["<b>Lesson Store</b><br/><i>semantic embeddings</i><br/><i>importance voting</i>"] -->|"retrieve similar"| CM
+    CM["<b>ConfigMerger</b><br/><i>inject lessons into</i><br/><i>fix step prompt</i>"] --> DA
+    DA["<b>DAG Agent</b><br/><i>runs next issue</i>"] -->|"patch"| SC
+    SC["<b>SWE-bench Scorer</b>"] -->|"pass → upvote<br/>fail → downvote"| LS
+    SC -->|"fail"| FA
 
     style GS fill:#0d1117,stroke:#3fb950,color:#fff
     style FA fill:#0d1117,stroke:#f85149,color:#fff
-    style CR fill:#0d1117,stroke:#f85149,color:#fff
-    style HH fill:#0d1117,stroke:#3fb950,color:#fff
+    style LS fill:#0d1117,stroke:#f0883e,color:#fff
+    style CM fill:#0d1117,stroke:#58a6ff,color:#fff
     style DA fill:#0d1117,stroke:#58a6ff,color:#fff
     style SC fill:#0d1117,stroke:#58a6ff,color:#fff
 ```
 
-The gold tests are the key. When an agent fails, the Failure Analyzer sees the full execution trace, the agent's patch, and the gold test names — it can pinpoint exactly what went wrong. For example: *"the agent changed the condition logic, but the gold test asserts on the error message string — the fix should have changed the message, not the condition."*
+The **gold tests** are what make this work. When an agent fails, the Failure Analyzer sees the agent's patch and the gold test output — it can pinpoint exactly what went wrong. Lessons are stored as-is (no generalization) and retrieved by semantic similarity when a similar issue appears.
 
-These lessons feed into the Config Reflector, which rewrites the DAG prompts. Not by appending a list of tips, but by integrating the lessons into the step instructions naturally. The new config is then validated head-to-head against the current one on fresh issues — the winner survives into the next cycle.
+**Importance voting** ensures the library self-corrects: lessons that help the agent pass get upvoted, lessons that don't help get downvoted and eventually pruned (at importance <= -4).
 
-The reflection approach is inspired by [GEPA](https://arxiv.org/abs/2506.08056) (Guided Evolutionary Prompt Adaptation), a Pareto-frontier-based prompt optimizer implemented in [DSPy](https://dspy.ai/) that mutates prompts via LLM reflection and selects candidates that improve on a holdout set. Midas adapts this idea to whole-config optimization: instead of optimizing individual prompts against a proxy metric, it reflects on real execution traces (successes and failures with gold-standard feedback) and proposes improved configs validated through head-to-head competition.
+### Inspiration
+
+- [**ExpeL**](https://arxiv.org/abs/2308.10144) (AAAI 2024) — experiential learning with lesson library and importance voting. Midas adapts ExpeL's dual-mode learning (specific trajectories + extracted insights) to coding agents on SWE-bench.
+- [**GEPA**](https://arxiv.org/abs/2506.08056) (ICLR 2026) — Guided Evolutionary Prompt Adaptation from [DSPy](https://dspy.ai/). Midas explored GEPA-style prompt reflection before discovering that storing specific lessons outperforms generalizing them into prompt rewrites.
 
 ## Quick Start
 
@@ -82,25 +86,29 @@ midas train --resume .midas/train/<run-dir>/
 ### Infer
 
 ```bash
-# Evaluate a trained DAG config on all SWE-bench Verified issues
-midas infer --dag .midas/train/<run-dir>/log/configs/ws-0_latest.yaml
+# Evaluate with trained DAG + lessons on all SWE-bench Verified issues
+midas infer --dag .midas/train/<run>/log/configs/ws-0_latest.yaml \
+            --lessons .midas/train/<run>/data/lessons.json
 
 # Evaluate on first N issues
+midas infer --dag config.yaml --lessons lessons.json --issues 50
+
+# Without lessons (DAG only)
 midas infer --dag config.yaml --issues 50
 
-# Interactive mode (solve a problem in your local repo)
+# Interactive mode
 midas infer --dag config.yaml
 ```
 
 ## Key Features
 
-- **Closed-loop learning** — failures are analyzed, lessons extracted, prompts improved
-- **DAG workflows** — multi-step plans that evolve from generic to battle-tested
-- **Adaptive workspaces** — champion vs challenger, winner survives
+- **Lesson library** — stores concrete failure analyses, retrieves by semantic similarity (sentence-transformers)
+- **Importance voting** — upvote lessons that help, downvote ones that don't, prune at <= -4
+- **DAG workflows** — multi-step plans generated from first successful trace
+- **Failure analyzer** — compares agent's patch against gold test output (no trace noise)
+- **ConfigMerger** — embeds issue + lessons into step prompts programmatically
 - **No task_done tool** — text response = done; unknown tool calls treated as termination
-- **ConfigMerger** — embeds issue into step prompts to prevent overscoping
-- **Rich failure analysis** — sees full trace, patch diff, and gold test names
-- **Checkpoint & resume** — per-episode snapshots, crash-safe
+- **Checkpoint & resume** — per-episode snapshots, lessons persist across runs
 
 ## Tests
 
@@ -112,7 +120,10 @@ midas infer --dag config.yaml
 .midas/train/<run>/
 ├── checkpoint.json
 ├── train_config.yaml
-├── all_preds.jsonl          # SWE-bench submission
-├── data/                    # Success + failure traces (GEPA dataset)
-└── log/configs/             # DAG YAML per episode (shows prompt evolution)
+├── all_preds.jsonl              # SWE-bench submission
+├── data/
+│   ├── lessons.json             # Lesson library with embeddings
+│   ├── ep1_<issue_id>.json      # Success traces
+│   └── fail2_<issue_id>.json    # Failure traces
+└── log/configs/                 # DAG YAML per episode
 ```
