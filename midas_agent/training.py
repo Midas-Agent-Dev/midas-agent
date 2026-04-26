@@ -496,11 +496,13 @@ def run_training(
         )
 
     # -- Episode loop --
+    initial_processed = len(processed_issue_ids)
+    total_episodes = initial_processed + len(issues)
     for episode_idx, issue in enumerate(issues):
-        global_idx = len(processed_issue_ids) + episode_idx
+        global_idx = initial_processed + episode_idx
         logger.info(
             "Episode %d/%d: %s (%s)",
-            global_idx + 1, global_idx + len(issues), issue.issue_id, issue.repo,
+            global_idx + 1, total_episodes, issue.issue_id, issue.repo,
         )
 
         # 1. Clone repo
