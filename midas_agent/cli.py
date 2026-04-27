@@ -298,7 +298,7 @@ def _infer_eval(args, dag_config, provider, budget, logger):
                 else:
                     raise
 
-    system_llm = lambda req: call_llm(req)
+    system_llm = lambda req: provider.complete(req)
     scorer = SWEBenchScorer(timeout=1800)
     results = []
 
@@ -347,7 +347,7 @@ def _infer_eval(args, dag_config, provider, budget, logger):
 
             t0 = time.time()
             result = executor.execute(merged, issue, call_llm,
-                                      balance_provider=lambda: remaining_budget[0],
+                                      balance_provider=lambda: budget,
                                       lessons=retrieved_lessons or None)
             elapsed = time.time() - t0
 
