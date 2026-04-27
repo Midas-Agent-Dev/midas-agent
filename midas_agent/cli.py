@@ -273,24 +273,10 @@ def _infer_eval(args, dag_config, provider, budget, logger):
 
     logger.info("Eval: %d issues, budget=%d", len(issues), budget)
 
-    from midas_agent.scheduler.resource_meter import BudgetExhaustedError
-
-    # Mutable budget tracker — reset per issue
-    remaining_budget = [budget]
-
     def call_llm(req, retries=3):
-        if remaining_budget[0] <= 0:
-            raise BudgetExhaustedError(
-                f"Budget exhausted (spent {budget - remaining_budget[0]} of {budget})"
-            )
         for attempt in range(retries):
             try:
-                resp = provider.complete(req)
-                if resp.usage:
-                    remaining_budget[0] -= (resp.usage.input_tokens + resp.usage.output_tokens)
-                return resp
-            except BudgetExhaustedError:
-                raise
+                return provider.complete(req)
             except Exception as e:
                 if attempt < retries - 1:
                     import time as _t
@@ -304,7 +290,6 @@ def _infer_eval(args, dag_config, provider, budget, logger):
 
     for i, issue in enumerate(issues):
         logger.info("Issue %d/%d: %s", i + 1, len(issues), issue.issue_id)
-        remaining_budget[0] = budget  # Reset per issue
 
         try:
             import subprocess
@@ -347,7 +332,7 @@ def _infer_eval(args, dag_config, provider, budget, logger):
 
             t0 = time.time()
             result = executor.execute(merged, issue, call_llm,
-                                      balance_provider=lambda: remaining_budget[0],
+                                      balance_provider=lambda: budget,
                                       lessons=retrieved_lessons or None)
             elapsed = time.time() - t0
 
