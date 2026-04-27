@@ -108,7 +108,9 @@ midas infer --dag config.yaml
 - **No task_done tool** — text response = done; unknown tool calls treated as termination
 - **Checkpoint & resume** — per-episode snapshots, lessons persist across runs
 
-## Results
+## Tests
+
+> Work in progress — only 20 of 500 SWE-bench Verified issues tested so far.
 
 Training run on 20 SWE-bench Verified issues (astropy subset) with MiniMax-M2.5. DAG generated from first successful episode (5 steps: localize → reproduce → implement → validate_targeted → validate_broad). Lessons extracted with `correct_approach` field.
 
