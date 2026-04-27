@@ -32,6 +32,8 @@ The agent's patch did NOT pass the gold test. Based on the trajectory and patch:
 1. What SPECIFICALLY did the agent do wrong?
 2. What is the ABSTRACT lesson (no file/function names — must generalize \
 to other issues)?
+3. What SHOULD the agent do instead? Describe the CORRECT approach — \
+a specific, actionable strategy (not just "avoid the mistake").
 
 Analyze the failure, then call the submit_lesson tool with your findings.\
 """
@@ -44,7 +46,8 @@ SUBMIT_LESSON_TOOL = {
         "description": (
             "Submit your failure analysis as a structured lesson. "
             "Call this exactly once with the step that failed, "
-            "what the agent did wrong, and the abstract lesson."
+            "what the agent did wrong, the abstract lesson, "
+            "and the correct approach."
         ),
         "parameters": {
             "type": "object",
@@ -64,8 +67,16 @@ SUBMIT_LESSON_TOOL = {
                         "No file or function names — must generalize to other issues."
                     ),
                 },
+                "correct_approach": {
+                    "type": "string",
+                    "description": (
+                        "What the agent SHOULD do instead — a specific, actionable "
+                        "strategy to fix this type of issue correctly. "
+                        "No file or function names — must generalize."
+                    ),
+                },
             },
-            "required": ["step_id", "mistake", "lesson"],
+            "required": ["step_id", "mistake", "lesson", "correct_approach"],
         },
     },
 }
@@ -76,6 +87,7 @@ class FailureAnalysis:
     step_id: str
     mistake: str
     lesson: str
+    correct_approach: str = ""
 
 
 class FailureAnalyzer:
@@ -150,6 +162,7 @@ class FailureAnalyzer:
                         step_id = args.get("step_id", "").strip().lower()
                         mistake = args.get("mistake", "").strip()
                         lesson = args.get("lesson", "").strip()
+                        correct_approach = args.get("correct_approach", "").strip()
 
                         if not step_id or not lesson:
                             logger.info("Failure analysis: empty step_id or lesson (attempt %d/%d)", attempt, max_attempts)
@@ -168,6 +181,7 @@ class FailureAnalyzer:
                             step_id=step_id,
                             mistake=mistake,
                             lesson=lesson,
+                            correct_approach=correct_approach,
                         )
 
             # LLM responded with text or wrong tool — retry

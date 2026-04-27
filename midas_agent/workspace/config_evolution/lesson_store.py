@@ -28,6 +28,7 @@ class Lesson:
     mistake: str
     lesson: str
     patch: str
+    correct_approach: str = ""
     importance: int = 2
 
 
@@ -125,6 +126,7 @@ class LessonStore:
         mistake: str,
         lesson: str,
         patch: str,
+        correct_approach: str = "",
     ) -> str:
         """Add a lesson from a failure analysis. Returns lesson_id."""
         lesson_id = uuid.uuid4().hex[:12]
@@ -137,6 +139,7 @@ class LessonStore:
             mistake=mistake,
             lesson=lesson,
             patch=patch,
+            correct_approach=correct_approach,
             importance=2,
         )
         self._lessons.append(new_lesson)

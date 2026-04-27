@@ -226,6 +226,7 @@ class ConfigEvolutionWorkspace(Workspace):
                                     mistake=analysis.mistake,
                                     lesson=analysis.lesson,
                                     patch=self._last_patch or "",
+                                    correct_approach=analysis.correct_approach,
                                 )
                             except Exception as e:
                                 logger.error("Failed to add lesson: %s", e)

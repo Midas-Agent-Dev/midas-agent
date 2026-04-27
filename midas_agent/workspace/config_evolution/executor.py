@@ -174,6 +174,8 @@ class DAGExecutor:
             for lesson in lessons:
                 lesson_lines.append(f"- Mistake: {lesson.mistake}")
                 lesson_lines.append(f"  Lesson: {lesson.lesson}")
+                if lesson.correct_approach:
+                    lesson_lines.append(f"  Correct approach: {lesson.correct_approach}")
             system_prompt += "\n".join(lesson_lines)
 
         instance_msg = DAG_INSTANCE_TEMPLATE.format(
