@@ -1,5 +1,7 @@
 # Midas Agent
 
+> **Status: Early concept validation** — this project is in the exploratory research phase. APIs, architecture, and results may change significantly.
+
 A self-improving coding agent that learns from its own failures. Given a set of GitHub issues, Midas trains a multi-step DAG workflow and builds a lesson library — so the agent avoids past mistakes on future issues.
 
 ## Motivation
