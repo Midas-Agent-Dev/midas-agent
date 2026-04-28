@@ -343,6 +343,8 @@ class GEPAConfigOptimizer:
             path = os.path.join(data_dir, f)
             with open(path) as fh:
                 data = json.load(fh)
+            if not isinstance(data, dict):
+                continue
             score = data.get("score", 0.0)
             if score >= 1.0:
                 self._dataset.add_episode(

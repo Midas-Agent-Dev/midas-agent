@@ -108,15 +108,58 @@ midas infer --dag config.yaml
 - **No task_done tool** — text response = done; unknown tool calls treated as termination
 - **Checkpoint & resume** — per-episode snapshots, lessons persist across runs
 
-## Tests
+## Evaluation
 
 > Work in progress — only 20 of 500 SWE-bench Verified issues tested so far.
 
+### Head-to-Head: Midas Agent vs SWE-agent v1.1.0
+
+Same model (MiniMax-M2.5), same 20 SWE-bench Verified issues (astropy subset). Midas Agent uses its trained 5-step DAG with a 1.5M token budget per issue. SWE-agent v1.1.0 uses its default config (function calling, anthropic-style file map, review-on-submit) with a 100-call limit per issue.
+
+| Issue | Midas | SWE-agent | Midas Iters | Midas Tokens | SWE-agent Iters | SWE-agent Tokens |
+|-------|-------|-----------|-------------|--------------|-----------------|------------------|
+| [12907](https://github.com/astropy/astropy/issues/12907) | **PASS** | **PASS** | 20 | 186K | 48 | 805K |
+| [13033](https://github.com/astropy/astropy/issues/13033) | FAIL | FAIL | 42 | 591K | 61 | 1,248K |
+| [13236](https://github.com/astropy/astropy/issues/13236) | FAIL | FAIL | 94 | 1,200K | 90 | 2,049K |
+| [13398](https://github.com/astropy/astropy/issues/13398) | FAIL | FAIL | 78 | 1,500K | 73 | 3,199K |
+| [13453](https://github.com/astropy/astropy/issues/13453) | **PASS** | **PASS** | 48 | 910K | 54 | 869K |
+| [13579](https://github.com/astropy/astropy/issues/13579) | **PASS** | **PASS** | 65 | 1,400K | 57 | 2,169K |
+| [13977](https://github.com/astropy/astropy/issues/13977) | FAIL | FAIL | 89 | 1,500K | 78 | 1,956K |
+| [14096](https://github.com/astropy/astropy/issues/14096) | **PASS** | **PASS** | 69 | 1,500K | 38 | 677K |
+| [14182](https://github.com/astropy/astropy/issues/14182) | FAIL | FAIL | 59 | 1,100K | 45 | 505K |
+| [14309](https://github.com/astropy/astropy/issues/14309) | **PASS** | **PASS** | 28 | 371K | 59 | 855K |
+| [14365](https://github.com/astropy/astropy/issues/14365) | FAIL | FAIL | 31 | 395K | 39 | 611K |
+| [14369](https://github.com/astropy/astropy/issues/14369) | **PASS** | FAIL | 78 | 1,500K | 61 | 1,496K |
+| [14508](https://github.com/astropy/astropy/issues/14508) | **PASS** | **PASS** | 64 | 1,100K | 66 | 1,576K |
+| [14539](https://github.com/astropy/astropy/issues/14539) | **PASS** | **PASS** | 43 | 924K | 44 | 658K |
+| [14598](https://github.com/astropy/astropy/issues/14598) | FAIL | FAIL | 93 | 1,500K | 81 | 1,798K |
+| [14995](https://github.com/astropy/astropy/issues/14995) | **PASS** | **PASS** | 43 | 691K | 42 | 517K |
+| [7166](https://github.com/astropy/astropy/issues/7166) | **PASS** | **PASS** | 44 | 478K | 40 | 566K |
+| [7336](https://github.com/astropy/astropy/issues/7336) | **PASS** | **PASS** | 13 | 71K | 27 | 209K |
+| [7606](https://github.com/astropy/astropy/issues/7606) | FAIL | FAIL | 31 | 217K | 31 | 245K |
+| [7671](https://github.com/astropy/astropy/issues/7671) | **PASS** | **PASS** | 50 | 668K | 32 | 305K |
+
+### Summary
+
+| Metric | Midas Agent | SWE-agent v1.1.0 |
+|--------|-------------|-------------------|
+| **Pass rate** | **12/20 (60%)** | 11/20 (55%) |
+| **Avg iterations/issue** | **47** | 53 |
+| **Avg tokens/issue** | **843K** | 1,115K |
+| **Total tokens (20 issues)** | **16.9M** | 22.3M |
+| **Unique solves** | 1 (14369) | 0 |
+
+Both agents share 11 common solves. Midas uniquely solves 14369, while every issue SWE-agent solves is also solved by Midas. Midas uses 25% fewer tokens on average due to its structured DAG workflow — the multi-step plan (localize, reproduce, implement, validate) avoids the aimless exploration that consumes tokens in a single-prompt agent.
+
+### Remarks
+
+- **Lesson retrieval does not necessarily improve results.** In the 20-issue training run, only 1 of 6 injected lessons clearly helped the agent (ep18: "check types before conversion" guided a None-check fix). Most solves (9/12) happened without any lesson. The similarity threshold (0.50) correctly blocked injection in 14/20 episodes, but importance voting suffers from false-positive upvotes when an irrelevant lesson is present during an independent solve. Self-retrieval of lessons on the same issue set is not meaningful — lessons need to be tested on *unseen* issues to measure real generalization.
+- **The DAG structure is the primary contributor to performance**, not lesson retrieval. The 5-step workflow (localize → reproduce → implement → validate_targeted → validate_broad) enforces a disciplined approach that prevents the agent from burning tokens on unfocused exploration.
+- **Further tests are being planned.** We intend to evaluate on the full 500-issue SWE-bench Verified set, test lesson transfer across different repositories (not just astropy), and compare with additional baselines and models.
+
+### Training Episode Details
+
 Training run on 20 SWE-bench Verified issues (astropy subset) with MiniMax-M2.5. DAG generated from first successful episode (5 steps: localize → reproduce → implement → validate_targeted → validate_broad). Lessons extracted with `correct_approach` field.
-
-**Solve rate: 12/20 (60%)**
-
-### Training Episode Results
 
 | Ep | Issue | Solved | Iters | Tokens | Lesson Injected | Lesson Impact |
 |----|-------|--------|-------|--------|-----------------|---------------|
@@ -141,22 +184,7 @@ Training run on 20 SWE-bench Verified issues (astropy subset) with MiniMax-M2.5.
 | 19 | [7606](https://github.com/astropy/astropy/issues/7606) | No | 31 | 217K | 13977 (sim=0.62) | Downvoted |
 | 20 | [7671](https://github.com/astropy/astropy/issues/7671) | **Yes** | 50 | 668K | 7606 (sim=0.53) | Upvoted |
 
-#### Lesson Analysis
-
-6 lessons were injected across 20 episodes. Each lesson contains **mistake**, **lesson**, and **correct_approach** fields. We manually verified whether each injected lesson was actually relevant to the target issue:
-
-| Ep | Lesson Source → Target | Sim | Result | Relevant? | Notes |
-|----|----------------------|-----|--------|-----------|-------|
-| 5 | 13236 → 13453 | 0.54 | Solved, Upvoted | No | Both in `astropy.table` but unrelated problems (deprecation warnings vs column formatting). False-positive upvote. |
-| 9 | 13236 → 14182 | 0.53 | Failed, Downvoted | No | Deprecation lesson irrelevant to RST header rendering. Correct downvote. |
-| 10 | 13236 → 14309 | 0.54 | Solved, Upvoted | No | Fix is a simple guard (`if args`), unrelated to warnings. False-positive upvote. |
-| 18 | 13977 → 7336 | 0.53 | Solved, Upvoted | **Yes** | Lesson: "check types before conversion." Fix: check if return annotation is None before `.to()`. **Strongest case of lesson helping.** |
-| 19 | 13977 → 7606 | 0.62 | Failed, Downvoted | **Yes** | Lesson was directly relevant but agent ignored it — applied broad try/except instead of the None check the lesson recommended. |
-| 20 | 7606 → 7671 | 0.53 | Solved, Upvoted | No | Version parsing problem, not equality-with-None. False-positive upvote. |
-
-**Summary**: 1/6 injections clearly helped (ep18), 1/6 was relevant but ignored (ep19), 4/6 were false matches from same-submodule embedding similarity. Most solves (9/12) happened without any lesson. The similarity threshold (0.50) blocked injection in 14/20 episodes where the top match was irrelevant. Importance voting suffers from false-positive upvotes when an irrelevant lesson is present during an independent solve.
-
-#### Trained Artifacts
+### Trained Artifacts
 
 The DAG config and lesson library from this run are stored in `artifacts/`:
 

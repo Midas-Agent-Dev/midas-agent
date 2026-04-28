@@ -194,7 +194,7 @@ class StrReplaceEditorAction(Action):
                 content = self._io.read_file(path)
             except FileNotFoundError:
                 # Could be a directory — check via bash
-                check = self._io.run_bash(f"test -d {path} && echo DIR || test -e {path} && echo FILE || echo MISSING")
+                check = self._io.run_bash(f"if test -d {path}; then echo DIR; elif test -e {path}; then echo FILE; else echo MISSING; fi")
                 check = check.strip()
                 if check == "DIR":
                     if view_range:
