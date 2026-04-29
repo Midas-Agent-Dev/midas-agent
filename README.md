@@ -112,17 +112,17 @@ midas infer --dag config.yaml
 
 ## Evaluation
 
-> Work in progress — 79 of 500 SWE-bench Verified issues tested so far (training run ongoing).
+> 100 of 500 SWE-bench Verified issues tested so far.
 
-### Pass Rate (79 issues)
+### Pass Rate (100 issues)
 
 | Repo | Passed | Total | Rate |
 |------|--------|-------|------|
 | astropy | 12 | 22 | 55% |
-| django | 40 | 57 | 70% |
-| **Overall** | **52** | **79** | **66%** |
+| django | 53 | 78 | 68% |
+| **Overall** | **65** | **100** | **65%** |
 
-Model: MiniMax-M2.5 with 1.5M token budget per issue. 5-step DAG (localize → reproduce → implement → validate_targeted → validate_broad). No lessons were injected — all 59 new episodes were blocked by the similarity threshold (0.50), confirming that the DAG structure is the primary driver of performance.
+Model: MiniMax-M2.5 with 1.5M token budget per issue. 5-step DAG (localize → reproduce → implement → validate_targeted → validate_broad).
 
 ### Head-to-Head: Midas Agent vs SWE-agent v1.1.0 (20-issue subset)
 
@@ -165,10 +165,10 @@ Both agents share 11 common solves. Midas uniquely solves 14369, while every iss
 
 ### Remarks
 
-- **Lesson retrieval has had zero impact so far.** Across 79 episodes, the similarity threshold (0.50) blocked lesson injection in 73 of 79 episodes. In the original 20 astropy episodes, 6 lessons were injected but only 1 clearly helped. In the 59 new episodes (astropy + django), zero lessons were injected — the highest similarity was 0.50 (just below threshold). The lesson library grew to 26 entries but issue-description similarity is too coarse to find matches across diverse issues.
-- **The DAG structure is the primary contributor to performance**, not lesson retrieval. The 5-step workflow (localize → reproduce → implement → validate_targeted → validate_broad) enforces a disciplined approach that prevents the agent from burning tokens on unfocused exploration. All 52 solves happened without lesson assistance.
-- **Django issues are significantly easier than astropy.** Django pass rate (70%) vs astropy (55%) reflects the global SWE-bench difficulty distribution — most failed astropy issues have <10% global solve rates, while failed django issues are in the 20-40% range.
-- **Further tests are being planned.** We intend to complete the 100-issue run, test lesson transfer with a lowered threshold (0.30), evaluate on the full 500-issue set, and compare with stronger models.
+- **Lesson retrieval shows no positive signal.** Across 100 episodes, lessons were injected in 19 episodes (53% pass rate) vs 81 episodes without lessons (67% pass rate). The lower pass rate with lessons is likely due to correlation with harder issues rather than lessons hurting, but there is no evidence that the current issue-description similarity approach helps. The lesson library grew to 30+ entries but matching by issue description is too coarse.
+- **The DAG structure is the primary contributor to performance**, not lesson retrieval. The 5-step workflow (localize → reproduce → implement → validate_targeted → validate_broad) enforces a disciplined approach that prevents the agent from burning tokens on unfocused exploration.
+- **Django issues are significantly easier than astropy.** Django pass rate (68%) vs astropy (55%) reflects the global SWE-bench difficulty distribution — most failed astropy issues have <10% global solve rates across all 134 leaderboard submissions.
+- **Further tests are being planned.** We intend to evaluate on the full 500-issue set, test lesson transfer with failure-mode matching instead of issue-description similarity, and compare with stronger models.
 
 ### Training Episode Details
 

@@ -1,0 +1,1 @@
+["Resolves the reported issue", "Includes adequate test coverage", "All existing tests pass", "Preserves backward compatibility", "Follows Django coding style", "Documentation updated if applicable", "Release notes updated if applicable", "No new deprecation warnings", "Performance impact is neutral", "Security implications are considered"]

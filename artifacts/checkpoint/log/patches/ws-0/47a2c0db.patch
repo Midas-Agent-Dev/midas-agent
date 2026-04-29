@@ -1,0 +1,133 @@
+diff --git a/django/db/migrations/autodetector.py b/django/db/migrations/autodetector.py
+index 30616c0172..40ecf86c2d 100644
+--- a/django/db/migrations/autodetector.py
++++ b/django/db/migrations/autodetector.py
+@@ -563,6 +563,31 @@ class MigrationAutodetector:
+                 if isinstance(base, str) and "." in base:
+                     base_app_label, base_name = base.split(".", 1)
+                     dependencies.append((base_app_label, base_name, None, True))
++            # Depend on the removal of any fields on base classes with the
++            # same name as fields on this model. This ensures that when moving
++            # a field to a subclass, the RemoveField from the parent runs before
++            # CreateModel of the subclass, avoiding a FieldError due to field
++            # clash.
++            for base in model_state.bases:
++                if isinstance(base, str):
++                    if "." in base:
++                        base_app_label, base_name = base.split(".", 1)
++                    else:
++                        base_app_label = app_label
++                        base_name = base
++                    old_model_key = (base_app_label, base_name.lower())
++                    if old_model_key in self.from_state.models:
++                        old_model_state = self.from_state.models[old_model_key]
++                        old_fields = set(old_model_state.fields.keys())
++                        new_fields = set(model_state.fields.keys())
++                        # Fields in both old (base) and new (subclass) models
++                        # are being moved from the parent to the child
++                        for field_name in old_fields & new_fields:
++                            # Check if this field is actually being removed
++                            # from the base (it's in old_field_keys but not new_field_keys)
++                            old_field_key = (base_app_label, base_name.lower(), field_name)
++                            if old_field_key in self.old_field_keys:
++                                dependencies.append((base_app_label, base_name.lower(), field_name, False))
+             # Depend on the other end of the primary key if it's a relation
+             if primary_key_rel:
+                 dependencies.append((
+diff --git a/test_migration_issue/test_reproduce.py b/test_migration_issue/test_reproduce.py
+new file mode 100644
+index 0000000000..e1ca07aa0f
+--- /dev/null
++++ b/test_migration_issue/test_reproduce.py
+@@ -0,0 +1,90 @@
++#!/usr/bin/env python
++"""
++Script to reproduce the issue where moving a field to a subclass causes a FieldError.
++"""
++import os
++import sys
++import django
++from django.conf import settings
++
++# Setup Django
++if not settings.configured:
++    settings.configure(
++        DEBUG=True,
++        DATABASES={
++            'default': {
++                'ENGINE': 'django.db.backends.sqlite3',
++                'NAME': ':memory:',
++            }
++        },
++        INSTALLED_APPS=[
++            'django.contrib.contenttypes',
++            'django.contrib.auth',
++        ],
++        USE_TZ=True,
++    )
++
++django.setup()
++
++from django.db import models
++from django.db.migrations.autodetector import MigrationAutodetector
++from django.db.migrations.state import ModelState, ProjectState
++
++
++# Initial state: Readable with title field
++readable_with_title = ModelState("testapp", "Readable", [
++    ("id", models.AutoField(primary_key=True)),
++    ("title", models.CharField(max_length=200)),
++])
++
++# Final state: Readable without title, Book (subclass) with title
++readable_without_title = ModelState("testapp", "Readable", [
++    ("id", models.AutoField(primary_key=True)),
++])
++
++book_with_title = ModelState("testapp", "Book", [
++    ("readable_ptr", models.OneToOneField(
++        "testapp.Readable", 
++        on_delete=models.CASCADE, 
++        parent_link=True, 
++        auto_created=True, 
++        primary_key=True, 
++        serialize=False
++    )),
++    ("title", models.CharField(max_length=200)),
++], bases=("testapp.Readable",))
++
++# Initial project state
++from_state = ProjectState()
++from_state.add_model(readable_with_title)
++
++# Final project state
++to_state = ProjectState()
++to_state.add_model(readable_without_title)
++to_state.add_model(book_with_title)
++
++# Detect changes - use the full detect_changes method
++from django.db.migrations.graph import MigrationGraph
++
++autodetector = MigrationAutodetector(from_state, to_state)
++
++# This is essentially what makemigrations does
++graph = MigrationGraph()
++changes = autodetector._detect_changes(graph)
++
++print("Changes detected:")
++if not changes:
++    print("  No changes detected!")
++
++for app_label, migrations in changes.items():
++    print(f"\n  App: {app_label}")
++    for migration in migrations:
++        print(f"    Migration: {migration.name}")
++        for i, op in enumerate(migration.operations):
++            print(f"      {i}: {op.__class__.__name__}")
++            if hasattr(op, 'name'):
++                print(f"          Name: {op.name}")
++            if hasattr(op, 'model_name'):
++                print(f"          Model: {op.model_name}")
++            if hasattr(op, '_auto_deps'):
++                print(f"          Dependencies: {op._auto_deps}")
+\ No newline at end of file

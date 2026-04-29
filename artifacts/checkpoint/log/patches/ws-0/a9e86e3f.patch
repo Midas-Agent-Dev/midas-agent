@@ -1,0 +1,206 @@
+diff --git a/django/db/migrations/operations/utils.py b/django/db/migrations/operations/utils.py
+index 6e2bacd549..facfd9fc60 100644
+--- a/django/db/migrations/operations/utils.py
++++ b/django/db/migrations/operations/utils.py
+@@ -19,7 +19,8 @@ def resolve_relation(model, app_label=None, model_name=None):
+                 )
+             return app_label, model_name
+         if '.' in model:
+-            return tuple(model.lower().split('.', 1))
++            app_label, model_name = model.split('.', 1)
++            return app_label, model_name.lower()
+         if app_label is None:
+             raise TypeError(
+                 'app_label must be provided to resolve unscoped model '
+diff --git a/test_reproduce/DJ_RegLogin/__init__.py b/test_reproduce/DJ_RegLogin/__init__.py
+new file mode 100644
+index 0000000000..ea8120e549
+--- /dev/null
++++ b/test_reproduce/DJ_RegLogin/__init__.py
+@@ -0,0 +1,6 @@
++from django.apps import AppConfig
++
++
++class DJ_RegLoginConfig(AppConfig):
++    name = 'DJ_RegLogin'
++    verbose_name = "Contents"
+\ No newline at end of file
+diff --git a/test_reproduce/DJ_RegLogin/apps.py b/test_reproduce/DJ_RegLogin/apps.py
+new file mode 100644
+index 0000000000..ea8120e549
+--- /dev/null
++++ b/test_reproduce/DJ_RegLogin/apps.py
+@@ -0,0 +1,6 @@
++from django.apps import AppConfig
++
++
++class DJ_RegLoginConfig(AppConfig):
++    name = 'DJ_RegLogin'
++    verbose_name = "Contents"
+\ No newline at end of file
+diff --git a/test_reproduce/DJ_RegLogin/models.py b/test_reproduce/DJ_RegLogin/models.py
+new file mode 100644
+index 0000000000..0e4cd32967
+--- /dev/null
++++ b/test_reproduce/DJ_RegLogin/models.py
+@@ -0,0 +1,23 @@
++from django.db import models
++
++
++class Category(models.Model):
++    title = models.CharField(max_length=100, db_index=True)
++    slug = models.SlugField(max_length=100, db_index=True)
++
++    class Meta:
++        verbose_name = "Category"
++        verbose_name_plural = "Categories"
++
++    def __str__(self):
++        return self.title
++
++
++class Content(models.Model):
++    title = models.CharField(max_length=100, unique=True)
++    slug = models.SlugField(max_length=100, unique=True)
++    body = models.TextField()
++    category = models.ForeignKey(Category, on_delete=models.CASCADE)
++
++    def __str__(self):
++        return self.title
+\ No newline at end of file
+diff --git a/test_reproduce/test_issue.py b/test_reproduce/test_issue.py
+new file mode 100644
+index 0000000000..94b91e2146
+--- /dev/null
++++ b/test_reproduce/test_issue.py
+@@ -0,0 +1,102 @@
++#!/usr/bin/env python
++"""
++Script to reproduce the mixed-case app name issue.
++"""
++import os
++import sys
++import django
++
++# Setup Django settings
++os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'test_settings')
++sys.path.insert(0, '/testbed/test_reproduce')
++
++# Configure Django 
++from django.conf import settings
++if not settings.configured:
++    settings.configure(
++        SECRET_KEY='test-secret-key',
++        DEBUG=True,
++        INSTALLED_APPS=[
++            'DJ_RegLogin',
++            'django.contrib.contenttypes',
++            'django.contrib.auth',
++        ],
++        DATABASES={
++            'default': {
++                'ENGINE': 'django.db.backends.sqlite3',
++                'NAME': ':memory:',
++            }
++        },
++        USE_TZ=True,
++    )
++
++django.setup()
++
++from django.apps import apps
++from django.db.migrations.state import ModelState, ProjectState
++from django.db import models
++
++# Test 1: Using ModelState to simulate a ForeignKey with string reference
++print("=" * 60)
++print("Test 1: Creating ModelState with string FK reference")
++print("=" * 60)
++
++# Get the Category model from our test app
++cat_model = apps.get_model('DJ_RegLogin', 'Category')
++print(f"Category model app_label: {cat_model._meta.app_label}")
++print(f"Category model name: {cat_model._meta.model_name}")
++
++# Now simulate what happens in migrations by using ModelState
++# with a string FK reference - this is what causes the issue
++model_state = ModelState(
++    app_label='DJ_RegLogin',
++    name='Content',
++    fields=[
++        ('id', models.AutoField(primary_key=True)),
++        ('title', models.CharField(max_length=100)),
++        ('category', models.ForeignKey('DJ_RegLogin.Category', on_delete=models.CASCADE)),
++    ],
++)
++print(f"Created ModelState fields: {model_state.fields}")
++
++# Try to get the related model from string - this should work
++field = model_state.fields['category']
++print(f"Field remote_field.model: {field.remote_field.model}")
++
++# Now, create ProjectState and try to render
++print("\n" + "=" * 60)
++print("Test 2: ProjectState.render()")
++print("=" * 60)
++
++project_state = ProjectState()
++project_state.add_model(model_state)
++
++try:
++    rendered = project_state.apps
++    print(f"Rendered successfully!")
++    print(f"Content model: {rendered.get_model('DJ_RegLogin', 'Content')}")
++except Exception as e:
++    print(f"ERROR: {type(e).__name__}: {e}")
++    import traceback
++    traceback.print_exc()
++
++# Test 3: Check the pending operations
++print("\n" + "=" * 60)
++print("Test 3: Check pending operations")
++print("=" * 60)
++
++# Check what's in the apps._pending_operations
++print(f"Apps pending operations: {apps._pending_operations}")
++
++print("\nDone!")
++
++# Test the make_model_tuple function directly
++print("\n" + "=" * 60)
++print("Test 4: Test make_model_tuple")
++print("=" * 60)
++
++from django.db.models.utils import make_model_tuple
++
++# Test with a string containing mixed-case app_label
++result = make_model_tuple("DJ_RegLogin.Category")
++print(f"make_model_tuple('DJ_RegLogin.Category') = {result}")
+\ No newline at end of file
+diff --git a/test_reproduce/test_settings.py b/test_reproduce/test_settings.py
+new file mode 100644
+index 0000000000..44da12bdf9
+--- /dev/null
++++ b/test_reproduce/test_settings.py
+@@ -0,0 +1,20 @@
++# Test settings for reproducing the mixed-case app name issue
++import os
++
++SECRET_KEY = 'test-secret-key'
++DEBUG = True
++
++INSTALLED_APPS = [
++    'DJ_RegLogin',
++    'django.contrib.contenttypes',
++    'django.contrib.auth',
++]
++
++DATABASES = {
++    'default': {
++        'ENGINE': 'django.db.backends.sqlite3',
++        'NAME': ':memory:',
++    }
++}
++
++USE_TZ = True
+\ No newline at end of file

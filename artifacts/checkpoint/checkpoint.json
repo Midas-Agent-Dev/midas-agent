@@ -1,5 +1,5 @@
 {
-  "episode_idx": 78,
+  "episode_idx": 99,
   "processed_issue_ids": [
     "astropy__astropy-12907",
     "astropy__astropy-13033",
@@ -79,12 +79,33 @@
     "django__django-12209",
     "django__django-12262",
     "django__django-12273",
-    "django__django-12276"
+    "django__django-12276",
+    "django__django-12304",
+    "django__django-12308",
+    "django__django-12325",
+    "django__django-12406",
+    "django__django-12419",
+    "django__django-12663",
+    "django__django-12708",
+    "django__django-12713",
+    "django__django-12741",
+    "django__django-12754",
+    "django__django-12774",
+    "django__django-12858",
+    "django__django-12965",
+    "django__django-13012",
+    "django__django-13023",
+    "django__django-13028",
+    "django__django-13033",
+    "django__django-13089",
+    "django__django-13109",
+    "django__django-13112",
+    "django__django-13121"
   ],
   "workspace_configs": {
-    "ws-0": "ws-0_ep78.yaml"
+    "ws-0": "ws-0_ep99.yaml"
   },
   "adaptive_multiplier_value": 1.0,
   "gepa_episodes_since_optimization": 0,
-  "timestamp": "2026-04-29T10:07:44.932077"
+  "timestamp": "2026-04-29T13:23:41.558251"
 }

@@ -1,0 +1,77 @@
+diff --git a/test_reproduce_issue.py b/test_reproduce_issue.py
+new file mode 100644
+index 0000000000..9384462cc8
+--- /dev/null
++++ b/test_reproduce_issue.py
+@@ -0,0 +1,70 @@
++"""
++Test script to reproduce the issue:
++Migration crashes deleting an index_together if there is a unique_together on the same fields
++"""
++import os
++import sys
++import django
++from django.conf import settings
++
++# Configure Django settings
++if not settings.configured:
++    settings.configure(
++        DATABASES={
++            'default': {
++                'ENGINE': 'django.db.backends.sqlite3',
++                'NAME': ':memory:',
++            }
++        },
++        INSTALLED_APPS=[
++            'django.contrib.contenttypes',
++            'django.contrib.auth',
++        ],
++        DEFAULT_AUTO_FIELD='django.db.models.BigAutoField',
++    )
++
++django.setup()
++
++from django.db import models, connection
++from django.db.backends.base.schema import BaseDatabaseSchemaEditor
++
++# Create a test model with both unique_together and index_together on the same fields
++class TestModel(models.Model):
++    field1 = models.CharField(max_length=100)
++    field2 = models.CharField(max_length=100)
++
++    class Meta:
++        app_label = 'test_app'
++        unique_together = [('field1', 'field2')]
++        index_together = [('field1', 'field2')]
++
++
++def test_delete_index_together():
++    """Test deleting index_together when unique_together exists on same fields"""
++    print("Creating table with both unique_together and index_together...")
++    
++    # Create the table
++    with connection.schema_editor() as editor:
++        editor.create_model(TestModel)
++    
++    print("Attempting to remove index_together (while keeping unique_together)...")
++    
++    # Now try to remove only the index_together while keeping unique_together
++    try:
++        with connection.schema_editor() as editor:
++            editor.alter_index_together(
++                TestModel,
++                old_index_together=[('field1', 'field2')],
++                new_index_together=[]  # Remove index_together
++            )
++        print("SUCCESS: index_together removed successfully!")
++    except ValueError as e:
++        print(f"FAILURE: {e}")
++        return False
++    
++    return True
++
++
++if __name__ == '__main__':
++    success = test_delete_index_together()
++    sys.exit(0 if success else 1)
+\ No newline at end of file

@@ -1,0 +1,224 @@
+diff --git a/django/db/models/fields/__init__.py b/django/db/models/fields/__init__.py
+index caa03665ea..2faa41a9cd 100644
+--- a/django/db/models/fields/__init__.py
++++ b/django/db/models/fields/__init__.py
+@@ -21,7 +21,7 @@ from django.utils.dateparse import (
+     parse_date, parse_datetime, parse_duration, parse_time,
+ )
+ from django.utils.duration import duration_microseconds, duration_string
+-from django.utils.functional import Promise, cached_property
++from django.utils.functional import cached_property, LazyObject, Promise, empty
+ from django.utils.ipv6 import clean_ipv6_address
+ from django.utils.itercompat import is_iterable
+ from django.utils.text import capfirst
+@@ -804,6 +804,12 @@ class Field(RegisterLookupMixin):
+         """Perform preliminary non-db specific value checks and conversions."""
+         if isinstance(value, Promise):
+             value = value._proxy____cast()
++        # Handle LazyObject (e.g., SimpleLazyObject) which needs to be evaluated
++        elif isinstance(value, LazyObject):
++            # Trigger evaluation by accessing any attribute, then get the actual wrapped value
++            if value._wrapped is empty:
++                str(value)  # This triggers _setup() in the lazy object
++            value = value._wrapped
+         return value
+ 
+     def get_db_prep_value(self, value, connection, prepared=False):
+diff --git a/test_bug.py b/test_bug.py
+new file mode 100644
+index 0000000000..ef72b56289
+--- /dev/null
++++ b/test_bug.py
+@@ -0,0 +1,84 @@
++#!/usr/bin/env python
++import os
++import django
++from django.conf import settings
++
++# Configure Django settings
++if not settings.configured:
++    settings.configure(
++        DEBUG=True,
++        DATABASES={
++            'default': {
++                'ENGINE': 'django.db.backends.sqlite3',
++                'NAME': ':memory:',
++            }
++        },
++        INSTALLED_APPS=[
++            'django.contrib.auth',
++            'django.contrib.contenttypes',
++        ],
++        DEFAULT_AUTO_FIELD='django.db.models.BigAutoField',
++    )
++    django.setup()
++
++from django.contrib.auth.models import User
++from django.db import models
++from django.db.models import OuterRef, Subquery
++from django.utils.functional import SimpleLazyObject
++
++# Create simple in-memory models for testing
++class A(models.Model):
++    class Meta:
++        app_label = 'test_app'
++
++class B(models.Model):
++    a = models.ForeignKey(A, on_delete=models.CASCADE)
++    class Meta:
++        app_label = 'test_app'
++
++class C(models.Model):
++    owner = models.ForeignKey(User, on_delete=models.CASCADE)
++    class Meta:
++        app_label = 'test_app'
++
++
++# Create the tables
++from django.db import connection
++with connection.schema_editor() as schema_editor:
++    schema_editor.create_model(A)
++    schema_editor.create_model(B)
++    schema_editor.create_model(C)
++
++
++def test_bug():
++    print("Testing bug reproduction...")
++    
++    # This is the query from the issue
++    owner_user = (
++        B.objects.filter(a=OuterRef("pk"))
++        .annotate(owner_user=Subquery(C.objects.values("owner")))
++        .values("owner_user")
++    )
++    
++    user = SimpleLazyObject(lambda: User.objects.create_user("testuser"))
++    
++    print("Attempting query with SimpleLazyObject...")
++    try:
++        query = A.objects.annotate(owner_user=Subquery(owner_user)).filter(
++            owner_user=user
++        )
++        # Execute the query to trigger the error
++        list(query)
++        print("SUCCESS! No error occurred.")
++    except TypeError as e:
++        print(f"ERROR: {e}")
++        return False
++    except Exception as e:
++        print(f"ERROR (other): {type(e).__name__}: {e}")
++        return False
++    
++    return True
++
++
++if __name__ == '__main__':
++    test_bug()
+\ No newline at end of file
+diff --git a/test_bug_simple.py b/test_bug_simple.py
+new file mode 100644
+index 0000000000..0c29162cea
+--- /dev/null
++++ b/test_bug_simple.py
+@@ -0,0 +1,100 @@
++#!/usr/bin/env python
++"""
++Reproduce the issue with SimpleLazyObject in nested subquery annotations.
++The issue is that SimpleLazyObject is not being properly unwrapped before being passed to get_prep_value.
++"""
++import os
++import sys
++
++# Add the testbed to path
++sys.path.insert(0, '/testbed')
++
++# Set up Django
++os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'test_settings')
++
++import django
++from django.conf import settings
++
++if not settings.configured:
++    settings.configure(
++        DEBUG=True,
++        DATABASES={
++            'default': {
++                'ENGINE': 'django.db.backends.sqlite3',
++                'NAME': ':memory:',
++            }
++        },
++        INSTALLED_APPS=[
++            'django.contrib.auth',
++            'django.contrib.contenttypes',
++        ],
++        DEFAULT_AUTO_FIELD='django.db.models.BigAutoField',
++    )
++
++django.setup()
++
++from django.db import connection
++from django.db.models import OuterRef, Subquery, IntegerField
++from django.utils.functional import SimpleLazyObject
++
++# Let's reproduce just the core issue: SimpleLazyObject not being evaluated before get_prep_value
++class MockModel:
++    """Mock model to simulate the issue without database"""
++    pass
++
++def test_simple_lazy_object_in_get_prep_value():
++    """
++    Test that shows SimpleLazyObject fails in get_prep_value because
++    the field's get_prep_value receives the lazy object instead of the resolved value.
++    """
++    print("Testing SimpleLazyObject handling in get_prep_value...")
++    
++    # This is the issue: IntegerField.get_prep_value receives SimpleLazyObject but tries to call int() on it
++    field = IntegerField()
++    
++    # Create a lazy object that, when resolved, would return a User pk (an int)
++    lazy_user = SimpleLazyObject(lambda: type('User', (), {'pk': 1})())
++    
++    print(f"Created SimpleLazyObject: {lazy_user}")
++    print(f"Has __int__: {hasattr(lazy_user, '__int__')}")
++    print(f"Lazy object type: {type(lazy_user)}")
++    
++    # This is what happens in the lookup - get_prep_value is called with the lazy object
++    try:
++        result = field.get_prep_value(lazy_user)
++        print(f"Result: {result}")
++    except TypeError as e:
++        print(f"ERROR: {e}")
++        return False
++    
++    return True
++
++
++def test_lookup_get_prep_lookup():
++    """Test that shows the lookup's get_prep_lookup doesn't handle SimpleLazyObject"""
++    print("\nTesting lookup get_prep_lookup...")
++    
++    from django.db.models.lookups import Lookup
++    from django.db.models.expressions import Value
++    
++    # Create a simple lhs that would have IntegerField as output_field
++    lhs = Value(1, output_field=IntegerField())
++    
++    # Create a lazy object 
++    lazy_user = SimpleLazyObject(lambda: type('User', (), {'pk': 1})())
++    
++    # Create a lookup
++    lookup = Lookup(lhs, lazy_user)
++    
++    print(f"Lookup rhs after get_prep_lookup: {lookup.rhs}")
++    
++    if isinstance(lookup.rhs, SimpleLazyObject):
++        print("ISSUE: lookup.rhs is still a SimpleLazyObject - not resolved!")
++        return False
++    
++    return True
++
++
++if __name__ == '__main__':
++    test_simple_lazy_object_in_get_prep_value()
++    test_lookup_get_prep_lookup()
+\ No newline at end of file

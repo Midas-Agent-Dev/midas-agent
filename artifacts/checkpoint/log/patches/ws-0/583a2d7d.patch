@@ -1,0 +1,95 @@
+diff --git a/django/db/backends/base/operations.py b/django/db/backends/base/operations.py
+index 2e283a3193..6e8726eccb 100644
+--- a/django/db/backends/base/operations.py
++++ b/django/db/backends/base/operations.py
+@@ -579,8 +579,15 @@ class BaseDatabaseOperations:
+         return []
+ 
+     def convert_durationfield_value(self, value, expression, connection):
+-        if value is not None:
++        if value is None:
++            return None
++        try:
+             return datetime.timedelta(0, 0, value)
++        except TypeError:
++            # value may be a string (e.g. from MySQL)
++            value = str(decimal.Decimal(value) / decimal.Decimal(1000000))
++            from django.utils.dateparse import parse_duration
++            return parse_duration(value)
+ 
+     def check_expression_support(self, expression):
+         """
+diff --git a/repro.py b/repro.py
+new file mode 100644
+index 0000000000..ffa0066822
+--- /dev/null
++++ b/repro.py
+@@ -0,0 +1,68 @@
++import os
++os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'test_settings')
++
++import django
++from django.conf import settings
++
++# Configure minimal settings
++if not settings.configured:
++    settings.configure(
++        DEBUG=True,
++        DATABASES={
++            'default': {
++                'ENGINE': 'django.db.backends.sqlite3',
++                'NAME': ':memory:',
++            }
++        },
++        INSTALLED_APPS=[
++            'django.contrib.contenttypes',
++            'django.contrib.auth',
++        ],
++    )
++    django.setup()
++
++from django.db import models, connection
++from django.db.models import F
++import datetime
++
++# Create a simple model
++class Experiment(models.Model):
++    name = models.CharField(max_length=100)
++    estimated_time = models.DurationField()
++
++    class Meta:
++        app_label = 'testapp'
++
++# Create the table
++with connection.schema_editor() as schema_editor:
++    schema_editor.create_model(Experiment)
++
++# Try to create an expression: F('estimated_time') + timedelta(1)
++delta = datetime.timedelta(days=1)
++expr = F('estimated_time') + delta
++
++# Check what SQL is generated
++qs = Experiment.objects.all()
++
++# This should trigger the error when annotating
++try:
++    # First let's see what compile produces
++    query = qs.query.clone()
++    query.add_annotation(expr, 'duration')
++    
++    compiler = query.get_compiler(connection=connection)
++    sql, params = compiler.as_sql()
++    print(f"SQL: {sql}")
++    print(f"Params: {params}")
++    
++    # Now try to execute
++    cursor = connection.cursor()
++    cursor.execute(sql, params)
++    results = cursor.fetchall()
++    print(f"Results: {results}")
++except Exception as e:
++    import traceback
++    print(f"Error: {type(e).__name__}: {e}")
++    traceback.print_exc()
++
++print("\nDone")
