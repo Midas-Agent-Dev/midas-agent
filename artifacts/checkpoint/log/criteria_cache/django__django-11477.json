@@ -1,0 +1,1 @@
+["The fix must pass all existing tests.", "The fix must maintain backward compatibility.", "The fix must follow Django's coding standards.", "The fix must include test coverage for new functionality.", "The fix must update documentation where appropriate.", "The fix must not introduce security vulnerabilities.", "The fix must not cause performance regressions."]

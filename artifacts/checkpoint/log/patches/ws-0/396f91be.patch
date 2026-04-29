@@ -1,0 +1,114 @@
+diff --git a/django/db/models/base.py b/django/db/models/base.py
+index e3b14a41a0..bbc1a0c108 100644
+--- a/django/db/models/base.py
++++ b/django/db/models/base.py
+@@ -415,6 +415,18 @@ class Model(metaclass=ModelBase):
+         # Set up the storage for instance state
+         self._state = ModelState()
+ 
++        # Check if pk was explicitly provided by the user
++        pk_field_name = opts.pk.attname if opts.pk else None
++        if pk_field_name and pk_field_name not in kwargs:
++            # Check if pk was provided via 'pk' alias
++            if 'pk' in kwargs:
++                pk_field_name = 'pk'
++        # Track whether pk was explicitly set
++        self._state.pk_set_explicitly = pk_field_name in kwargs or (
++            len(args) > 0 and opts.pk and 
++            any(opts.pk == f for f in opts.concrete_fields[:len(args)])
++        )
++
+         # There is a rather weird disparity here; if kwargs, it's set, then args
+         # overrides it. It should be one or the other; don't duplicate the work
+         # The reason for the kwargs check is that standard iterator passes in by
+@@ -840,23 +852,25 @@ class Model(metaclass=ModelBase):
+                        if f.name in update_fields or f.attname in update_fields]
+ 
+         pk_val = self._get_pk_val(meta)
++        pk_set = pk_val is not None
+         if pk_val is None:
+             pk_val = meta.pk.get_pk_value_on_save(self)
+             setattr(self, meta.pk.attname, pk_val)
+-        pk_set = pk_val is not None
+-        if not pk_set and (force_update or update_fields):
++        if not pk_val and (force_update or update_fields):
+             raise ValueError("Cannot force an update in save() with no primary key.")
+         updated = False
+         # Skip an UPDATE when adding an instance and primary key has a default.
++        # Only force insert if the pk value was NOT explicitly set by the user.
+         if (
+             not force_insert and
+             self._state.adding and
++            not getattr(self._state, 'pk_set_explicitly', False) and
+             self._meta.pk.default and
+             self._meta.pk.default is not NOT_PROVIDED
+         ):
+             force_insert = True
+         # If possible, try an UPDATE. If that doesn't update anything, do an INSERT.
+-        if pk_set and not force_insert:
++        if pk_val and not force_insert:
+             base_qs = cls._base_manager.using(using)
+             values = [(f, None, (getattr(self, f.attname) if raw else f.pre_save(self, False)))
+                       for f in non_pks]
+diff --git a/verify_fix.py b/verify_fix.py
+new file mode 100644
+index 0000000000..377163d75f
+--- /dev/null
++++ b/verify_fix.py
+@@ -0,0 +1,56 @@
++import os
++os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'tests.test_sqlite')
++
++from django.conf import settings
++settings.configure(
++    DEBUG=True,
++    DATABASES={'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': ':memory:'}},
++    INSTALLED_APPS=['django.contrib.contenttypes', 'django.contrib.auth'],
++    DEFAULT_AUTO_FIELD='django.db.models.AutoField',
++)
++import django
++django.setup()
++
++from django.db import models, connection, reset_queries
++from uuid import uuid4
++
++class Sample(models.Model):
++    id = models.UUIDField(primary_key=True, default=uuid4)
++    name = models.CharField(blank=True, max_length=100)
++    class Meta:
++        app_label = 'test_app'
++
++with connection.schema_editor() as editor:
++    editor.create_model(Sample)
++
++print("VERIFYING THE FIX:")
++print("=" * 50)
++
++# Step 1: s0 = Sample.objects.create() - creates with auto-generated pk
++s0 = Sample()
++s0.save()
++print(f"Step 1: s0 = Sample().save() -> pk={s0.pk}")
++
++# Step 2: s1 = Sample(pk=s0.pk, name='Test 1') - explicit pk that exists
++reset_queries()
++s1 = Sample(pk=s0.pk, name='Test 1')
++print(f"Step 2: s1 = Sample(pk=s0.pk, name='Test 1')")
++
++# Step 3: s1.save() - should UPDATE now
++print("Step 3: s1.save()")
++s1.save()
++queries = connection.queries
++print(f"Queries executed: {len(queries)}")
++for i, q in enumerate(queries):
++    sql = q['sql'].upper()
++    print(f"  Query {i+1}: {sql[:60]}...")
++
++insert_count = sum(1 for q in queries if 'INSERT' in q['sql'].upper())
++update_count = sum(1 for q in queries if 'UPDATE' in q['sql'].upper())
++
++print(f"\nResult: {insert_count} INSERT(s), {update_count} UPDATE(s)")
++
++if update_count >= 1 and insert_count == 0:
++    print("FIXED: UPDATE performed instead of INSERT!")
++else:
++    print("STILL BROKEN")

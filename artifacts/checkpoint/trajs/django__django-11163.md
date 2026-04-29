@@ -1,0 +1,73 @@
+# django__django-11163
+**Score**: 1.000
+**Workspace**: ws-0
+
+## Trace
+
+```
+[iter 1] bash(command=grep -r "model_to_dict" /testbed --include="*.py" | head -50) → /testbed/django/forms/models.py:    'ModelForm', 'BaseModelForm', 'model_to_dict', 'fields_for_model', /testbed/django/forms/models.py:def model_to_di...
+[iter 2] str_replace_editor(path=/testbed/django/forms/models.py, view_range=[1, 50], command=view) → Here's the result of running `cat -n` on /testbed/django/forms/models.py:      1	"""      2	Helper functions for creating Form classes from Django mod...
+[iter 3] bash(command=grep -n "def model_to_dict" /testbed/django/forms/models.py) → 69:def model_to_dict(instance, fields=None, exclude=None):
+[iter 4] str_replace_editor(command=view, path=/testbed/django/forms/models.py, view_range=[69, 130]) → Here's the result of running `cat -n` on /testbed/django/forms/models.py:     69	def model_to_dict(instance, fields=None, exclude=None):     70	    ""...
+[iter 5] bash(command=cd /testbed && cat > test_issue.py << 'EOF'
+import django
+from django.conf impor...) → (empty)
+[iter 6] bash(command=cd /testbed && python test_issue.py) → model_to_dict(instance): {'id': 1, 'name': 'test', 'score': 100} model_to_dict(instance, fields=None): {'id': 1, 'name': 'test', 'score': 100} model_t...
+[iter 7] str_replace_editor(new_str=for f in chain(opts.concrete_fields, opts.private_fields, opts.many_to_many):
+  ..., command=str_replace, path=/testbed/django/forms/models.py, old_str=for f in chain(opts.concrete_fields, opts.private_fields, opts.many_to_many):
+  ...) → The file /testbed/django/forms/models.py has been edited. Here's the result of running `cat -n` on a snippet of /testbed/django/forms/models.py:     7...
+[iter 8] bash(command=cd /testbed && python test_issue.py) → model_to_dict(instance): {'id': 1, 'name': 'test', 'score': 100} model_to_dict(instance, fields=None): {'id': 1, 'name': 'test', 'score': 100} model_t...
+[iter 9] bash(command=cd /testbed && cat > test_edge_cases.py << 'EOF'
+import django
+from django.conf ...) → === Testing Edge Cases ===  fields=None: {'id': 1, 'name': 'test', 'score': 100} Traceback (most recent call last):   File "test_edge_cases.py", line ...
+[iter 10] bash(command=cd /testbed && cat > test_edge_cases.py << 'EOF'
+import django
+from django.conf ...) → === Testing Edge Cases ===  fields=None: {'id': 1, 'name': 'test', 'score': 100} PASS  fields=[]: {} PASS  fields=['name']: {'name': 'test'} PASS  fie...
+[iter 11] bash(command=cd /testbed && python -m pytest tests/model_forms/tests.py -v -k "model_to_dict"...) → /opt/miniconda3/envs/testbed/bin/python: No module named pytest
+[iter 12] bash(command=cd /testbed && python -m django test model_forms.tests -k "model_to_dict" --sett...) → usage: __main__.py test [-h] [--noinput] [--failfast]                         [--testrunner TESTRUNNER] [-t TOP_LEVEL] [-p PATTERN]                   ...
+[iter 13] bash(command=cd /testbed/tests && python runtests.py model_forms.tests.ModelToDictTests 2>&1 ...) → Creating test database for alias 'default'... . ---------------------------------------------------------------------- Ran 1 test in 0.004s  OK Destro...
+[iter 14] bash(command=cd /testbed && grep -A 30 "class ModelToDictTests" tests/model_forms/tests.py) → class ModelToDictTests(TestCase):     def test_many_to_many(self):         """Data for a ManyToManyField is a list rather than a lazy QuerySet."""    ...
+[iter 15] bash(command=rm /testbed/test_issue.py /testbed/test_edge_cases.py) → (empty)
+[iter 16] bash(command=cd /testbed && cat > test_reproduce.py << 'EOF'
+import django
+from django.conf i...) → model_to_dict(instance): {'id': 1, 'name': 'test', 'score': 100} model_to_dict(instance, fields=[]): {}  SUCCESS: fields=[] returns empty dict as expe...
+[iter 17] str_replace_editor(view_range=[83, 92], command=view, path=/testbed/django/forms/models.py) → Here's the result of running `cat -n` on /testbed/django/forms/models.py:     83	    for f in chain(opts.concrete_fields, opts.private_fields, opts.ma...
+[iter 18] bash(command=rm /testbed/test_reproduce.py) → (empty)
+[iter 19] str_replace_editor(command=view, path=/testbed/django/forms/models.py, view_range=[83, 92]) → Here's the result of running `cat -n` on /testbed/django/forms/models.py:     83	    for f in chain(opts.concrete_fields, opts.private_fields, opts.ma...
+[iter 20] str_replace_editor(command=view, path=/testbed/django/forms/models.py, view_range=[83, 92]) → Here's the result of running `cat -n` on /testbed/django/forms/models.py:     83	    for f in chain(opts.concrete_fields, opts.private_fields, opts.ma...
+[iter 21] bash(command=cd /testbed && python -c "
+import django
+from django.conf import settings
+
+if no...) → model_to_dict(instance, fields=[]): {} PASS: Fix is working correctly!
+[iter 22] bash(command=cd /testbed && python -c "
+import django
+from django.conf import settings
+
+if no...) → model_to_dict(instance): {'id': 1, 'name': 'test', 'score': 100} PASS: fields=None returns all fields model_to_dict(instance, fields=[]): {} PASS: fie...
+[iter 23] bash(command=cd /testbed/tests && python runtests.py model_forms.tests.ModelToDictTests 2>&1) → Creating test database for alias 'default'... . ---------------------------------------------------------------------- Ran 1 test in 0.005s  OK Destro...
+[iter 24] bash(command=cd /testbed/tests && python runtests.py model_forms 2>&1 | tail -20) → Cloning test database for alias 'default'... Cloning test database for alias 'default'... Cloning test database for alias 'default'... Cloning test da...
+[iter 25] bash(command=cd /testbed/tests && python runtests.py forms_tests 2>&1 | tail -10) → FAILED (errors=1, skipped=1) Destroying test database for alias 'default'... Destroying test database for alias 'default'... Destroying test database ...
+[iter 26] bash(command=cd /testbed/tests && python runtests.py forms_tests --verbosity=1 2>&1 | head -5...) → Testing against Django installed in '/testbed/django' with up to 8 processes System check identified no issues (0 silenced). Creating test database fo...
+[iter 27] bash(command=cd /testbed/tests && python runtests.py forms_tests.tests.ModelForms 2>&1 | tail...) → ERROR: ModelForms (unittest.loader._FailedTest) ---------------------------------------------------------------------- ImportError: Failed to import t...
+[iter 28] bash(command=cd /testbed/tests && python runtests.py forms_tests.tests.test_forms 2>&1 | tail...) → Testing against Django installed in '/testbed/django' with up to 8 processes System check identified no issues (0 silenced). ............................
+```
+
+## Patch
+
+```diff
+diff --git a/django/forms/models.py b/django/forms/models.py
+index d157c291ef..5edbbd376f 100644
+--- a/django/forms/models.py
++++ b/django/forms/models.py
+@@ -83,7 +83,7 @@ def model_to_dict(instance, fields=None, exclude=None):
+     for f in chain(opts.concrete_fields, opts.private_fields, opts.many_to_many):
+         if not getattr(f, 'editable', False):
+             continue
+-        if fields and f.name not in fields:
++        if fields is not None and f.name not in fields:
+             continue
+         if exclude and f.name in exclude:
+             continue
+
+```

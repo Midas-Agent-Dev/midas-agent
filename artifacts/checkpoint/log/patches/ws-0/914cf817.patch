@@ -1,0 +1,101 @@
+diff --git a/django/contrib/contenttypes/fields.py b/django/contrib/contenttypes/fields.py
+index ed98ecb48c..6098b71a39 100644
+--- a/django/contrib/contenttypes/fields.py
++++ b/django/contrib/contenttypes/fields.py
+@@ -202,7 +202,7 @@ class GenericForeignKey(FieldCacheMixin):
+             else:
+                 model = self.get_content_type(id=ct_id,
+                                               using=obj._state.db).model_class()
+-                return (model._meta.pk.get_prep_value(getattr(obj, self.fk_field)),
++                return (model._meta.pk.to_python(getattr(obj, self.fk_field)),
+                         model)
+ 
+         return (
+diff --git a/tests/contenttypes_tests/test_uuid_prefetch.py b/tests/contenttypes_tests/test_uuid_prefetch.py
+new file mode 100644
+index 0000000000..f3143d29f0
+--- /dev/null
++++ b/tests/contenttypes_tests/test_uuid_prefetch.py
+@@ -0,0 +1,81 @@
++"""
++Test case to reproduce the UUID prefetch_related bug.
++This test should be run using Django's test framework.
++"""
++import uuid
++from unittest import skipUnless
++
++from django.contrib.contenttypes.fields import GenericForeignKey
++from django.contrib.contenttypes.models import ContentType
++from django.db import connection, models
++from django.test import TestCase, skipUnlessDBFeature
++
++
++# Test models - these will be registered in the test database
++class UUIDPKModel(models.Model):
++    """A model with UUID as primary key."""
++    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
++    name = models.CharField(max_length=100)
++
++    class Meta:
++        app_label = 'contenttypes_tests'
++
++
++class GFKModel(models.Model):
++    """A model with GenericForeignKey to UUIDPKModel."""
++    content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE)
++    object_id = models.CharField(max_length=255)
++    content_object = GenericForeignKey('content_type', 'object_id')
++
++    class Meta:
++        app_label = 'contenttypes_tests'
++
++
++@skipUnlessDBFeature('supports_uuid_fields')
++class UUIDPrefetchRelatedTest(TestCase):
++    """Test prefetch_related with UUID primary keys."""
++
++    @classmethod
++    def setUpClass(cls):
++        super().setUpClass()
++        # Create the tables
++        with connection.schema_editor() as schema_editor:
++            schema_editor.create_model(UUIDPKModel)
++            schema_editor.create_model(GFKModel)
++
++    @classmethod
++    def tearDownClass(cls):
++        with connection.schema_editor() as schema_editor:
++            schema_editor.delete_model(GFKModel)
++            schema_editor.delete_model(UUIDPKModel)
++        super().tearDownClass()
++
++    def test_prefetch_related_with_uuid_pk(self):
++        """
++        Test that prefetch_related works with UUID primary keys.
++        
++        This is the bug reported in the issue - prefetch_related returns None
++        when the related model uses UUID as primary key.
++        """
++        # Create a UUIDPKModel instance
++        foo = UUIDPKModel.objects.create(name='Test UUID')
++        
++        # Create a GFKModel instance referencing the UUID model
++        ct = ContentType.objects.get_for_model(UUIDPKModel)
++        bar = GFKModel.objects.create(content_type=ct, object_id=str(foo.id))
++        
++        # Test WITHOUT prefetch_related - this should work
++        bar_without_prefetch = GFKModel.objects.get(pk=bar.pk)
++        self.assertIsNotNone(bar_without_prefetch.content_object)
++        self.assertEqual(bar_without_prefetch.content_object.id, foo.id)
++        
++        # Test WITH prefetch_related - this is the bug!
++        bars = list(GFKModel.objects.all().prefetch_related('content_object'))
++        
++        # This should NOT be None - but it is due to the bug
++        self.assertEqual(len(bars), 1)
++        self.assertIsNotNone(
++            bars[0].content_object,
++            "prefetch_related returned None for GenericForeignKey with UUID PK"
++        )
++        self.assertEqual(bars[0].content_object.id, foo.id)
+\ No newline at end of file

@@ -1,0 +1,122 @@
+diff --git a/django/forms/models.py b/django/forms/models.py
+index 5edbbd376f..beadc25f9d 100644
+--- a/django/forms/models.py
++++ b/django/forms/models.py
+@@ -49,7 +49,8 @@ def construct_instance(form, instance, fields=None, exclude=None):
+         # Leave defaults for fields that aren't in POST data, except for
+         # checkbox inputs because they don't appear in POST data if not checked.
+         if (f.has_default() and
+-                form[f.name].field.widget.value_omitted_from_data(form.data, form.files, form.add_prefix(f.name))):
++                form[f.name].field.widget.value_omitted_from_data(form.data, form.files, form.add_prefix(f.name)) and
++                cleaned_data.get(f.name) in form[f.name].field.empty_values):
+             continue
+         # Defer saving file-type fields until after the other fields, so a
+         # callable upload_to can use the values from other fields.
+diff --git a/reproduce_issue.py b/reproduce_issue.py
+new file mode 100644
+index 0000000000..66b02c5a8c
+--- /dev/null
++++ b/reproduce_issue.py
+@@ -0,0 +1,101 @@
++#!/usr/bin/env python
++"""
++Script to reproduce the issue where cleaned_data cannot overwrite a field's default value.
++
++The issue is:
++1. Field has a default on the model
++2. Field is INCLUDED in the form's fields
++3. Field is NOT in the submitted POST data (user didn't submit it)
++4. User sets value in clean() method based on another field
++5. User expects that value to be saved to the model
++
++This should work but doesn't because construct_instance skips fields with defaults
++when they're omitted from POST data.
++"""
++import os
++import sys
++import django
++
++os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'test_settings')
++
++from django.conf import settings
++if not settings.configured:
++    settings.configure(
++        DEBUG=True,
++        DATABASES={
++            'default': {
++                'ENGINE': 'django.db.backends.sqlite3',
++                'NAME': ':memory:',
++            }
++        },
++        INSTALLED_APPS=[
++            'django.contrib.contenttypes',
++            'django.contrib.auth',
++        ],
++    )
++
++django.setup()
++
++from django.db import models, connection
++
++# Create a simple model with a default value
++class Book(models.Model):
++    title = models.CharField(max_length=100)
++    author = models.CharField(max_length=100, default='Unknown')  # This field has a default
++
++    class Meta:
++        app_label = 'test_app'
++
++# Create the table
++with connection.schema_editor() as schema_editor:
++    schema_editor.create_model(Book)
++
++from django import forms
++
++# Define the form WITH the author field included
++class BookForm(forms.ModelForm):
++    author = forms.CharField(required=False)  # Make it not required
++    
++    class Meta:
++        model = Book
++        fields = ['title', 'author']  # author IS in the form fields
++    
++    def clean(self):
++        # The user wants to derive author from title
++        cleaned_data = super().clean()
++        title = cleaned_data.get('title', '')
++        if title:
++            # Derive the author value from title
++            cleaned_data['author'] = 'Author of ' + title
++        return cleaned_data
++
++print("=" * 60)
++print("Test: Field with default, included in form, but omitted from POST")
++print("=" * 60)
++
++# Submit form with only 'title' - 'author' is omitted from POST data
++# But 'author' IS in the form fields
++form = BookForm({'title': 'My Book'})  # author is NOT in this data
++print(f"Form fields: {list(form.fields.keys())}")
++print(f"Submitted data: {{'title': 'My Book'}}")
++print(f"Form is valid: {form.is_valid()}")
++print(f"Cleaned data after form.clean(): {form.cleaned_data}")
++
++book = form.save()
++print(f"Instance author AFTER save: {book.author}")
++print()
++
++if book.author == 'Author of My Book':
++    print("SUCCESS: cleaned_data was correctly applied to the model!")
++else:
++    print(f"FAILURE: expected 'Author of My Book', got '{book.author}'")
++    sys.exit(1)
++
++if book.author == 'Author of My Book':
++    print("SUCCESS: cleaned_data was correctly applied to the model!")
++else:
++    print(f"FAILURE: expected 'Author of My Book', got '{book.author}'")
++    print("The issue is confirmed - cleaned_data cannot overwrite field defaults")
++    sys.exit(1)
++
++print("\nAll tests passed!")
+\ No newline at end of file

@@ -1,0 +1,1 @@
+["Fix correctly addresses the reported issue", "All existing tests pass", "New tests are added to cover the fix", "Documentation is updated if applicable", "No regression in functionality", "Conforms to Django coding standards"]

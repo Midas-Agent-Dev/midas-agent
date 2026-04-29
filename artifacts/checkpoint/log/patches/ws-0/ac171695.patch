@@ -1,0 +1,34 @@
+diff --git a/django/core/mail/message.py b/django/core/mail/message.py
+index e393b4cf5c..e9cb978b58 100644
+--- a/django/core/mail/message.py
++++ b/django/core/mail/message.py
+@@ -257,7 +257,7 @@ class EmailMessage:
+             msg['Date'] = formatdate(localtime=settings.EMAIL_USE_LOCALTIME)
+         if 'message-id' not in header_names:
+             # Use cached DNS_NAME for performance
+-            msg['Message-ID'] = make_msgid(domain=DNS_NAME)
++            msg['Message-ID'] = make_msgid(domain=DNS_NAME.domain)
+         for name, value in self.extra_headers.items():
+             if name.lower() != 'from':  # From is already handled
+                 msg[name] = value
+diff --git a/django/core/mail/utils.py b/django/core/mail/utils.py
+index d18dfe4667..71901b8534 100644
+--- a/django/core/mail/utils.py
++++ b/django/core/mail/utils.py
+@@ -16,5 +16,16 @@ class CachedDnsName:
+             self._fqdn = socket.getfqdn()
+         return self._fqdn
+ 
++    @property
++    def domain(self):
++        """Return the domain part of the hostname in ASCII-compatible form."""
++        fqdn = self.get_fqdn()
++        try:
++            fqdn.encode('ascii')
++        except UnicodeEncodeError:
++            # Encode the non-ASCII domain to punycode (IDNA)
++            fqdn = fqdn.encode('idna').decode('ascii')
++        return fqdn
++
+ 
+ DNS_NAME = CachedDnsName()

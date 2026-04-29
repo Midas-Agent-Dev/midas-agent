@@ -1,0 +1,108 @@
+diff --git a/django/utils/numberformat.py b/django/utils/numberformat.py
+index 88b35fc435..a1faa18c9f 100644
+--- a/django/utils/numberformat.py
++++ b/django/utils/numberformat.py
+@@ -31,6 +31,11 @@ def format(number, decimal_sep, decimal_pos=None, grouping=0, thousand_sep='',
+         # scientific notation to avoid high memory usage in {:f}'.format().
+         _, digits, exponent = number.as_tuple()
+         if abs(exponent) + len(digits) > 200:
++            if decimal_pos is not None and exponent < 0:
++                # If the absolute value of the exponent is greater than decimal_pos,
++                # the number rounds to zero with the given decimal positions.
++                if exponent < -decimal_pos:
++                    return '0' + (decimal_sep + '0' * decimal_pos if decimal_pos else '')
+             number = '{:e}'.format(number)
+             coefficient, exponent = number.split('e')
+             # Format the coefficient.
+diff --git a/reproduce.py b/reproduce.py
+new file mode 100644
+index 0000000000..1a849e81af
+--- /dev/null
++++ b/reproduce.py
+@@ -0,0 +1,75 @@
++#!/usr/bin/env python
++import os
++import sys
++
++# Setup Django settings
++os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'test_settings')
++
++# Create a minimal settings file
++settings_content = """
++SECRET_KEY = 'test-secret-key'
++USE_L10N = True
++USE_THOUSAND_SEPARATOR = False
++"""
++
++with open('/testbed/test_settings.py', 'w') as f:
++    f.write(settings_content)
++
++sys.path.insert(0, '/testbed')
++
++import django
++django.setup()
++
++from django.utils.numberformat import format as nformat
++from decimal import Decimal
++
++print("Testing the issue:")
++print("=" * 50)
++
++# Test cases from the issue
++print(f"nformat(Decimal('1e-199'), '.', decimal_pos=2) = {repr(nformat(Decimal('1e-199'), '.', decimal_pos=2))}")
++print(f"Expected: '0.00'")
++
++print(f"nformat(Decimal('1e-200'), '.', decimal_pos=2) = {repr(nformat(Decimal('1e-200'), '.', decimal_pos=2))}")
++print(f"Expected: '0.00'")
++
++print(f"nformat(Decimal('1e-201'), '.', decimal_pos=2) = {repr(nformat(Decimal('1e-201'), '.', decimal_pos=2))}")
++print(f"Expected: '0.00'")
++
++print()
++print("Testing other edge cases:")
++print("=" * 50)
++
++# Test without decimal_pos - should still use exponential notation for numbers beyond 200 digits
++print(f"nformat(Decimal('9e-999'), '.') = {repr(nformat(Decimal('9e-999'), '.'))}")
++print(f"Expected: '9e-999' (exponential notation is fine when decimal_pos not specified)")
++
++print(f"nformat(Decimal('1e-201'), '.') = {repr(nformat(Decimal('1e-201'), '.'))}")
++print(f"Expected: exponential notation")
++
++# Test with very large numbers with decimal_pos (should still be exponential)
++print(f"nformat(Decimal('1e200'), '.', decimal_pos=2) = {repr(nformat(Decimal('1e200'), '.', decimal_pos=2))}")
++print(f"Expected: exponential or similar")
++
++# From test file
++tests = [
++    ('9e9999', None, '9e+9999'),
++    ('9e9999', 3, '9.000e+9999'),
++    ('9e201', None, '9e+201'),
++    ('9e200', None, '9e+200'),
++    ('1.2345e999', 2, '1.23e+999'),
++    ('9e-999', None, '9e-999'),
++    ('1e-7', 8, '0.00000010'),
++    ('1e-8', 8, '0.00000001'),
++    ('1e-9', 8, '0.00000000'),
++    ('1e-10', 8, '0.00000000'),
++    ('1e-11', 8, '0.00000000'),
++]
++
++print()
++print("Running test cases from test file:")
++print("=" * 50)
++for value, decimal_pos, expected_value in tests:
++    result = nformat(Decimal(value), '.', decimal_pos)
++    status = "OK" if result == expected_value else "FAIL"
++    print(f"{status} nformat(Decimal('{value}'), '.', {decimal_pos}) = {repr(result)}, expected {repr(expected_value)}")
+\ No newline at end of file
+diff --git a/test_settings.py b/test_settings.py
+new file mode 100644
+index 0000000000..487afcecde
+--- /dev/null
++++ b/test_settings.py
+@@ -0,0 +1,4 @@
++
++SECRET_KEY = 'test-secret-key'
++USE_L10N = True
++USE_THOUSAND_SEPARATOR = False

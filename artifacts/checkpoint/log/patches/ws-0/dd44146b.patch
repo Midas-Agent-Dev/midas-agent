@@ -1,0 +1,310 @@
+diff --git a/django/db/models/sql/query.py b/django/db/models/sql/query.py
+index 08d7faf194..404c065cef 100644
+--- a/django/db/models/sql/query.py
++++ b/django/db/models/sql/query.py
+@@ -328,6 +328,10 @@ class Query(BaseExpression):
+             obj.subq_aliases = self.subq_aliases.copy()
+         obj.used_aliases = self.used_aliases.copy()
+         obj._filtered_relations = self._filtered_relations.copy()
++        if self.combined_queries:
++            # Since combined_queries are Query objects, they must be cloned so
++            # modifications to the cloned query don't affect the original.
++            obj.combined_queries = tuple(q.clone() for q in self.combined_queries)
+         # Clear the cached_property
+         try:
+             del obj.base_table
+diff --git a/reproduce2.py b/reproduce2.py
+new file mode 100644
+index 0000000000..bc4e1e1e59
+--- /dev/null
++++ b/reproduce2.py
+@@ -0,0 +1,64 @@
++#!/usr/bin/env python
++"""More aggressive reproduction - check before and after."""
++import django
++from django.conf import settings
++settings.configure(
++    DATABASES={'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': ':memory:'}},
++    INSTALLED_APPS=['django.contrib.contenttypes', 'django.contrib.auth']
++)
++django.setup()
++
++from django.db import models, connection
++
++class Dimension(models.Model):
++    name = models.CharField(max_length=100)
++    order = models.IntegerField(default=0)
++    class Meta:
++        app_label = 'test_app'
++
++with connection.schema_editor() as editor:
++    editor.create_model(Dimension)
++
++Dimension.objects.bulk_create([
++    Dimension(pk=10, name='boeksoort', order=1),
++    Dimension(pk=11, name='grootboek', order=2),
++    Dimension(pk=16, name='item6', order=7),
++    Dimension(pk=17, name='item7', order=8),
++])
++
++qs = (
++    Dimension.objects.filter(pk__in=[10, 11])
++    .union(Dimension.objects.filter(pk__in=[16, 17]))
++    .order_by('order')
++)
++
++print("BEFORE any derived operations:")
++print("  qs.query.order_by =", qs.query.order_by)
++print("  qs.query.combined_queries[0].order_by =", qs.query.combined_queries[0].order_by)
++print("  qs.query.combined_queries[1].order_by =", qs.query.combined_queries[1].order_by)
++
++# Evaluate first time
++result1 = list(qs)
++print("\nAFTER first eval:")
++print("  result:", [d.pk for d in result1])
++print("  qs.query.order_by =", qs.query.order_by)
++print("  qs.query.combined_queries[0].order_by =", qs.query.combined_queries[0].order_by)
++print("  qs.query.combined_queries[1].order_by =", qs.query.combined_queries[1].order_by)
++
++# Do derived operation
++derived = qs.order_by().values_list('pk', flat=True)
++print("\nAFTER derived order_by().values_list():")
++print("  derived.query.order_by =", derived.query.order_by)
++print("  qs.query.order_by =", qs.query.order_by)
++print("  qs.query.combined_queries[0].order_by =", qs.query.combined_queries[0].order_by)
++print("  qs.query.combined_queries[1].order_by =", qs.query.combined_queries[1].order_by)
++
++result_derived = list(derived)
++print("  derived result:", result_derived)
++
++print("\nNOW try to re-evaluate ORIGINAL qs:")
++try:
++    result2 = list(qs)
++    print("  result:", [d.pk for d in result2])
++except Exception as e:
++    print(f"  ERROR: {type(e).__name__}: {e}")
+\ No newline at end of file
+diff --git a/reproduce3.py b/reproduce3.py
+new file mode 100644
+index 0000000000..3cb6960ee9
+--- /dev/null
++++ b/reproduce3.py
+@@ -0,0 +1,75 @@
++#!/usr/bin/env python
++"""Try different reproduction scenarios."""
++import django
++from django.conf import settings
++settings.configure(
++    DATABASES={'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': ':memory:'}},
++    INSTALLED_APPS=['django.contrib.contenttypes', 'django.contrib.auth']
++)
++django.setup()
++
++from django.db import models, connection
++
++class Number(models.Model):
++    num = models.IntegerField(default=0)
++    class Meta:
++        app_label = 'test_app'
++
++with connection.schema_editor() as editor:
++    editor.create_model(Number)
++
++Number.objects.bulk_create([Number(num=i) for i in range(20)])
++
++# Scenario 1: More complex ordering with union
++print("=" * 50)
++print("SCENARIO 1: union with order_by")
++qs1 = Number.objects.filter(num__in=[1, 2, 3])
++qs2 = Number.objects.filter(num__in=[7, 8, 9])
++combined = qs1.union(qs2).order_by('num')
++
++print("First evaluation:")
++print("  Result:", [n.num for n in combined])
++
++print("\nDerived order_by().values_list():")
++derived = combined.order_by().values_list('num', flat=True)
++print("  Result:", list(derived))
++
++print("\nRe-evaluate original:")
++try:
++    result = list(combined)
++    print("  Result:", [n.num for n in result])
++except Exception as e:
++    print(f"  ERROR: {type(e).__name__}: {e}")
++
++# Scenario 2: Using an annotation in order_by
++print("=" * 50)
++print("SCENARIO 2: union with annotation in order_by")
++from django.db.models import F
++qs1 = Number.objects.filter(num__lte=5)
++qs2 = Number.objects.filter(num__gte=15)
++combined = qs1.union(qs2).order_by(F('num') * 1)
++
++print("First evaluation:")
++try:
++    result = list(combined)
++    print("  Result:", [n.num for n in result])
++except Exception as e:
++    print(f"  ERROR: {type(e).__name__}: {e}")
++
++print("\nDerived:")
++derived = combined.order_by().values_list('num', flat=True)
++try:
++    result = list(derived)
++    print("  Result:", result)
++except Exception as e:
++    print(f"  ERROR: {type(e).__name__}: {e}")
++
++print("\nRe-evaluate original:")
++try:
++    result = list(combined)
++    print("  Result:", [n.num for n in result])
++except Exception as e:
++    print(f"  ERROR: {type(e).__name__}: {e}")
++
++print("=" * 50)
++print("Done")
+\ No newline at end of file
+diff --git a/reproduce4.py b/reproduce4.py
+new file mode 100644
+index 0000000000..226108572b
+--- /dev/null
++++ b/reproduce4.py
+@@ -0,0 +1,69 @@
++#!/usr/bin/env python
++"""Try more scenarios based on the issue."""
++import django
++from django.conf import settings
++settings.configure(
++    DATABASES={'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': ':memory:'}},
++    INSTALLED_APPS=['django.contrib.contenttypes', 'django.contrib.auth']
++)
++django.setup()
++
++from django.db import models, connection
++
++class Number(models.Model):
++    num = models.IntegerField(default=0)
++    val = models.IntegerField(default=0)
++    class Meta:
++        app_label = 'test_app'
++
++with connection.schema_editor() as editor:
++    editor.create_model(Number)
++
++Number.objects.bulk_create([
++    Number(num=i, val=i*10) for i in range(20)
++])
++
++# Scenario: union with order_by using a field, then call values() 
++print("=" * 50)
++print("SCENARIO: union.order_by('val').values('num')")
++qs1 = Number.objects.filter(num__in=[1, 2, 3])
++qs2 = Number.objects.filter(num__in=[7, 8, 9])
++combined = qs1.union(qs2).order_by('val')
++
++print("First evaluation (no values):")
++result = list(combined)
++print("  Result:", [(n.num, n.val) for n in result])
++
++print("\norder_by().values():")
++# Using order_by() to clear, then values()
++derived = combined.order_by().values('num')
++result = list(derived)
++print("  Result:", result)
++
++print("\nNow original qs:")
++try:
++    result = list(combined)
++    print("  Result:", [(n.num, n.val) for n in result])
++except Exception as e:
++    print(f"  ERROR: {type(e).__name__}: {e}")
++
++# Another scenario
++print("=" * 50)
++print("SCENARIO: union.order_by('num').values('num')")
++qs1 = Number.objects.filter(num__in=[1, 2, 3])
++qs2 = Number.objects.filter(num__in=[7, 8, 9])
++combined = qs1.union(qs2).order_by('num')
++
++result1 = list(combined)
++print("First evaluation:", [n.num for n in result1])
++
++derived = combined.order_by().values('num')
++result2 = list(derived)
++print("Derived:", result2)
++
++# Now evaluate original again
++result3 = list(combined)
++print("Re-evaluate:", [n.num for n in result3])
++
++print("=" * 50)
++print("Done")
+\ No newline at end of file
+diff --git a/reproduce5.py b/reproduce5.py
+new file mode 100644
+index 0000000000..d0acc1a9b6
+--- /dev/null
++++ b/reproduce5.py
+@@ -0,0 +1,59 @@
++#!/usr/bin/env python
++"""Try scenario with fewer fields."""
++import django
++from django.conf import settings
++settings.configure(
++    DATABASES={'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': ':memory:'}},
++    INSTALLED_APPS=['django.contrib.contenttypes', 'django.contrib.auth']
++)
++django.setup()
++
++from django.db import models, connection
++
++class Number(models.Model):
++    num = models.IntegerField(default=0)
++    class Meta:
++        app_label = 'test_app'
++
++with connection.schema_editor() as editor:
++    editor.create_model(Number)
++
++Number.objects.bulk_create([Number(num=i) for i in range(20)])
++
++# When order_by() is called AND values() is used, what happens?
++qs1 = Number.objects.filter(num__lte=5)
++qs2 = Number.objects.filter(num__gte=15)
++qs = qs1.union(qs2)
++print("Union without order_by:")
++print("  qs.query.combinator:", qs.query.combinator)
++print("  qs.query.order_by:", qs.query.order_by)
++print("  qs.query.combined_queries:", (id(qs.query.combined_queries[0]), id(qs.query.combined_queries[1])))
++
++# Now add order_by
++qs_ordered = qs.order_by('num')
++print("\nAfter order_by('num'):")
++print("  qs_ordered.query.order_by:", qs_ordered.query.order_by)
++print("  qs_ordered.query.combined_queries:", (id(qs_ordered.query.combined_queries[0]), id(qs_ordered.query.combined_queries[1])))
++print("  Same as original? (should be different with fix)", 
++      qs.query.combined_queries[0] is qs_ordered.query.combined_queries[0])
++
++# Now use values()
++qs_values = qs_ordered.values('num')
++print("\nAfter values('num'):")
++print("  qs_values.query.select:", qs_values.query.select)
++print("  qs_values.query.values_select:", qs_values.query.values_select)
++
++# Check result
++print("\nResult of qs_values:")
++try:
++    print("  ", list(qs_values))
++except Exception as e:
++    print(f"  ERROR: {e}")
++
++# Now evaluate original again
++print("\nRe-evaluate original qs_ordered:")
++try:
++    result = list(qs_ordered)
++    print("  ", [n.num for n in result])
++except Exception as e:
++    print(f"  ERROR: {e}")
+\ No newline at end of file

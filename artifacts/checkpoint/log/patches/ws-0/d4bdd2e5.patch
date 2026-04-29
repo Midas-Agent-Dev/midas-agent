@@ -1,0 +1,191 @@
+diff --git a/django/core/validators.py b/django/core/validators.py
+index 92394a7eae..0c4044c6b9 100644
+--- a/django/core/validators.py
++++ b/django/core/validators.py
+@@ -94,7 +94,7 @@ class URLValidator(RegexValidator):
+ 
+     regex = _lazy_re_compile(
+         r'^(?:[a-z0-9\.\-\+]*)://'  # scheme is validated separately
+-        r'(?:\S+(?::\S*)?@)?'  # user:pass authentication
++        r'(?:(?:[^\s:@/]+|%[0-9A-Fa-f]{2})+(?::(?:[^\s:@/]+|%[0-9A-Fa-f]{2})+)?@)?'  # user:pass authentication
+         r'(?:' + ipv4_re + '|' + ipv6_re + '|' + host_re + ')'
+         r'(?::\d{2,5})?'  # port
+         r'(?:[/?#][^\s]*)?'  # resource path
+diff --git a/test_fix.py b/test_fix.py
+new file mode 100644
+index 0000000000..04b25e6427
+--- /dev/null
++++ b/test_fix.py
+@@ -0,0 +1,85 @@
++#!/usr/bin/env python
++import re
++
++ul = '\u00a1-\uffff'  # unicode letters range
++
++# IP patterns
++ipv4_re = r'(?:25[0-5]|2[0-4]\d|[0-1]?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|[0-1]?\d?\d)){3}'
++ipv6_re = r'\[[0-9a-f:\.]+\]'
++
++# Host patterns
++hostname_re = r'[a-z' + ul + r'0-9](?:[a-z' + ul + r'0-9-]{0,61}[a-z' + ul + r'0-9])?'
++domain_re = r'(?:\.(?!-)[a-z' + ul + r'0-9-]{1,63}(?<!-))*'
++tld_re = (
++    r'\.'
++    r'(?!-)'                            
++    r'(?:[a-z' + ul + '-]{2,63}'         
++    r'|xn--[a-z0-9]{1,59})'              
++    r'(?<!-)'                            
++    r'\.?'                               
++)
++host_re = '(' + hostname_re + domain_re + tld_re + '|localhost)'
++
++# RFC 1738:  Within the user and password field, any ':', '@", or '/' must be encoded
++# So username can't have : @ / (all three must be encoded)
++# And password also can't have : @ / (all three must be encoded)
++user_re = r'(?:[^\:@\/\r\n\s]+|%[0-9A-Fa-f]{2})+'
++pass_re = r'(?:[^\:@\/\r\n\s]+|%[0-9A-Fa-f]{2})+'  # Can't have : @ / either
++
++# Combined auth part  
++auth_re = r'(?:' + user_re + r'(?:(?::' + pass_re + r')?)@)?'
++
++# Full regex
++regex = re.compile(
++    r'^(?:[a-z0-9\.\-\+]*)://'  # scheme is validated separately
++    + auth_re
++    + r'(?:' + ipv4_re + '|' + ipv6_re + '|' + host_re + ')'  # host
++    r'(?::\d{2,5})?'  # port
++    r'(?:[/?#][^\s]*)?'  # resource path
++    r'\Z', re.IGNORECASE)
++
++# Test URLs - fixed expectations to match RFC 1738
++test_cases = [
++    # Basic auth cases  
++    ('http://user:pass@example.com', True),
++    ('http://user@example.com', True),
++    ('http://example.com', True),
++    ('http://foo/bar@example.com', False),  # Invalid / in username
++    ('http://foo:bar@example.com', True),  # Valid - : is NOT in username here
++    ('http://user:pass/word@example.com', False),  # Invalid / in password
++    ('http://user:pass:word@example.com', False),  # Invalid : in password (RFC 1738 requires encoding)
++    ('http://user@name:pass@example.com', False),  # Invalid @ in username
++
++    # Encoded chars  
++    ('http://foo%2Fbar@example.com', True),  # Encoded /
++    ('http://user%40name@example.com', True),  # Encoded @
++    ('http://user%3Apass@example.com', True),  # Encoded :
++    ('http://user:pass%2Fword@example.com', True),  # Encoded / in password
++    ('http://user:pass%3Aword@example.com', True),  # Encoded : in password
++
++    # IP addresses with auth
++    ('http://user:pass@192.168.1.1', True),
++    ('http://user:pass@192.168.1.1:8080', True),
++    ('http://user:pass@[::1]', True),
++    ('http://user:pass@[::1]:8080', True),
++
++    # More edge cases - passwords can have colons, but not @ or /
++    ('http://user:pass:word@host@example.com', False),  # @ in password
++    ('http://user:pass:word/host@example.com', False),  # / in password
++
++    # localhost with auth
++    ('http://user:pass@localhost', True),
++    ('http://user:pass@localhost:8080', True),
++]
++
++all_ok = True
++for url, should_pass in test_cases:
++    m = regex.match(url)
++    result = bool(m)
++    status = 'OK' if result == should_pass else 'FAIL'
++    if result != should_pass:
++        all_ok = False
++    print(status, url, '->', 'MATCH' if m else 'NO MATCH')
++
++print()
++print('ALL OK:', all_ok)
+\ No newline at end of file
+diff --git a/test_issue.py b/test_issue.py
+new file mode 100644
+index 0000000000..1b6b6732f2
+--- /dev/null
++++ b/test_issue.py
+@@ -0,0 +1,79 @@
++#!/usr/bin/env python
++"""
++Test script to reproduce the issue with URLValidator accepting 
++invalid characters in username and password fields.
++"""
++
++import sys
++import os
++import django
++from django.conf import settings
++
++# Configure Django settings
++settings.configure(
++    DEBUG=True,
++    SECRET_KEY='test-secret-key',
++)
++
++django.setup()
++
++from django.core.validators import URLValidator
++from django.core.exceptions import ValidationError
++
++validator = URLValidator()
++
++test_urls = [
++    # URLs with invalid characters in username/password that should be rejected
++    ("http://foo/bar@example.com", "Invalid: '/' in username"),
++    ("http://foo:bar@baz@example.com", "Valid: normal username:password"),
++    ("http://foo%2Fbar@example.com", "Valid: % encoded '/' in username"),
++    ("http://user:pass@example.com", "Valid: normal user:pass"),
++    ("http://user:pass:word@example.com", "Invalid: multiple ':' in password part (unescaped)"),
++    ("http://user:pass/word@example.com", "Invalid: '/' in password part (unescaped)"),
++    ("http://user@name:pass@example.com", "Invalid: '@' in username (before the @ that separates user from host)"),
++    ("http://user%40name:pass@example.com", "Valid: % encoded '@' in username"),
++    ("http://user:pass%2Fword@example.com", "Valid: % encoded '/' in password"),
++    ("http://user:pass%3Aword@example.com", "Valid: % encoded ':' in password"),
++    ("http://foo%2F:bar@example.com", "Valid: % encoded '/' in username and normal password"),
++    ("http://foo:bar%2Fbaz@example.com", "Valid: normal username and % encoded '/' in password"),
++]
++
++print("Testing URLValidator with various URLs:\n")
++
++for url, description in test_urls:
++    try:
++        validator(url)
++        result = "VALID"
++    except ValidationError as e:
++        result = "INVALID"
++    
++    # Check if the result matches expectations
++    if "Invalid:" in description:
++        should_be = "INVALID"
++        status = "CORRECT" if result == should_be else "WRONG (should be INVALID)"
++    else:
++        should_be = "VALID" 
++        status = "CORRECT" if result == should_be else "WRONG (should be VALID)"
++    
++    print(result + " | " + description)
++    print("         | " + status)
++    print()
++
++if __name__ == "__main__":
++    # Return non-zero if there's at least one incorrect result
++    incorrect = False
++    for url, description in test_urls:
++        try:
++            validator(url)
++            result = "VALID"
++        except ValidationError as e:
++            result = "INVALID"
++        
++        if "Invalid:" in description and result == "VALID":
++            incorrect = True
++            break
++        elif "Invalid:" not in description and result == "INVALID":
++            incorrect = True
++            break
++    
++    sys.exit(1 if incorrect else 0)
+\ No newline at end of file

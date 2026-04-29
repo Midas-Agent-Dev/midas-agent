@@ -1,0 +1,65 @@
+diff --git a/django/core/validators.py b/django/core/validators.py
+index 92394a7eae..b6aaa1396a 100644
+--- a/django/core/validators.py
++++ b/django/core/validators.py
+@@ -92,6 +92,29 @@ class URLValidator(RegexValidator):
+     )
+     host_re = '(' + hostname_re + domain_re + tld_re + '|localhost)'
+ 
++    # Characters allowed in user and password per RFC 1738 section 3.1.
++    # Within the user and password field, any ":", "@", or "/" must be encoded.
++    # The characters allowed are: alphanumerics, unreserved and safe chars.
++    user_chars = r'[a-zA-Z0-9._~!\$&' + "'" + r'()*+,;=-]'
++    password_chars = user_chars  # Same as user chars - no unencoded : @ /
++    percent_encoded = r'%[0-9A-Fa-f]{2}'
++
++    # Build the userinfo pattern
++    user_char_re = r'(?:' + user_chars + r'|' + percent_encoded + r')+'
++    password_char_re = r'(?:' + password_chars + r'|' + percent_encoded + r')+'
++
++    # userinfo: user:pass@ or user@ or :pass@ (all followed by host)
++    # The characters after the @ must be valid host characters (otherwise it's path)
++    # This prevents 'user@host/path' from being parsed incorrectly
++    userinfo_re = (
++        r'(?:'
++        + user_char_re + r'(?::' + password_char_re + r')?'
++        + '|'
++        + ':' + password_char_re
++        + r')@'
++        + host_re
++    )
++
+     regex = _lazy_re_compile(
+         r'^(?:[a-z0-9\.\-\+]*)://'  # scheme is validated separately
+         r'(?:\S+(?::\S*)?@)?'  # user:pass authentication
+@@ -148,6 +171,30 @@ class URLValidator(RegexValidator):
+         if len(urlsplit(value).netloc) > 253:
+             raise ValidationError(self.message, code=self.code)
+ 
++        # Validate the userinfo (username and password) per RFC 1738 section 3.1.
++        # Within the user and password field, any ":", "@", or "/" must be encoded.
++        username, password = urlsplit(value).username, urlsplit(value).password
++        if username or password:
++            # RFC 1738 section 3.1 allows these characters unencoded:
++            # alphanumeric, unreserved ($!$&'()*+,;=.-_~), and safe ($!$&'()*+,;=)
++            # Note: the characters :, @, / must be percent-encoded
++            userinfo_allowed = re.compile(
++                r'^[\w\!\$\&\'\(\)\*\+\,\;\=\-\.\~]+$',
++                re.IGNORECASE
++            )
++            for char in username:
++                if char != '%' and not userinfo_allowed.match(char):
++                    raise ValidationError(self.message, code=self.code)
++            # For password, the same rules apply but colon is allowed as separator
++            if password is not None:
++                password_allowed = re.compile(
++                    r'^[\w\!\$\&\'\(\)\*\+\,\;\=\-\.\~]+$',
++                    re.IGNORECASE
++                )
++                for char in password:
++                    if char != '%' and not password_allowed.match(char):
++                        raise ValidationError(self.message, code=self.code)
++
+ 
+ integer_validator = RegexValidator(
+     _lazy_re_compile(r'^-?\d+\Z'),

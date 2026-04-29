@@ -1,0 +1,130 @@
+diff --git a/django/db/models/base.py b/django/db/models/base.py
+index 844c01e95e..ca2faf0f31 100644
+--- a/django/db/models/base.py
++++ b/django/db/models/base.py
+@@ -803,6 +803,20 @@ class Model(metaclass=ModelBase):
+         meta = cls._meta
+         inserted = False
+         for parent, field in meta.parents.items():
++            # Detect when the primary key has been reset to None.
++            # In multi-table inheritance, the primary key of the child model
++            # is stored in the parent table. When the user sets the parent's 
++            # pk field to None to force an insert, we need to also clear the 
++            # child's pk link field and mark this as a new instance.
++            # Only apply this when the object was retrieved from the database
++            # (i.e., not when creating a new instance).
++            if field and not self._state.adding:
++                pk_val = getattr(self, field.attname)
++                parent_pk_val = getattr(self, parent._meta.pk.attname)
++                # If parent's pk is None but child's pk link is set, user wants new instance
++                if parent_pk_val is None and pk_val is not None:
++                    setattr(self, field.attname, None)
++                    self._state.adding = True
+             # Make sure the link fields are synced between parent and self.
+             if (field and getattr(self, parent._meta.pk.attname) is None and
+                     getattr(self, field.attname) is not None):
+diff --git a/test_issue.py b/test_issue.py
+new file mode 100644
+index 0000000000..b4facc0a7c
+--- /dev/null
++++ b/test_issue.py
+@@ -0,0 +1,98 @@
++#!/usr/bin/env python
++"""
++Reproduction script for: Resetting primary key for a child model doesn't work.
++
++In the attached example code setting the primary key to None does not work (so that 
++the existing object is overwritten on save()).
++"""
++
++import os
++import sys
++import django
++from django.conf import settings
++
++# Configure Django settings
++BASE_DIR = os.path.dirname(os.path.abspath(__file__))
++DATABASES = {
++    'default': {
++        'ENGINE': 'django.db.backends.sqlite3',
++        'NAME': ':memory:',
++    }
++}
++
++settings.configure(
++    DEBUG=True,
++    DATABASES=DATABASES,
++    INSTALLED_APPS=[
++        'django.contrib.contenttypes',
++        'django.contrib.auth',
++    ],
++    DEFAULT_AUTO_FIELD='django.db.models.AutoField',
++)
++
++django.setup()
++
++from django.db import models, connection
++
++# Define models as per the issue
++class Item(models.Model):
++    uid = models.AutoField(primary_key=True, editable=False)
++    f = models.BooleanField(default=False)
++
++    def reset(self):
++        self.uid = None
++        self.f = False
++
++    class Meta:
++        app_label = 'test_app'
++
++
++class Derived(Item):
++    class Meta:
++        app_label = 'test_app'
++
++
++# Create tables
++with connection.schema_editor() as schema_editor:
++    schema_editor.create_model(Item)
++    schema_editor.create_model(Derived)
++
++
++def test_reset_pk():
++    """Test that resetting the primary key for a child model creates a new object."""
++    # Create the first object
++    derived = Derived.objects.create(f=True)
++    pk = derived.pk
++    print(f"Created first object with pk={pk}, f={derived.f}")
++    
++    # Get the item
++    item = Item.objects.get(pk=pk)
++    obj1 = item.derived
++    
++    # Reset and save - should create a NEW object
++    obj1.reset()
++    obj1.save()  # This should create a new object, not overwrite the existing one
++    
++    # Check results
++    print(f"After save, obj1.pk = {obj1.pk}")
++    print(f"Total Item objects: {Item.objects.count()}")
++    print(f"Total Derived objects: {Derived.objects.count()}")
++    
++    # Get both objects
++    all_items = Item.objects.all().order_by('pk')
++    print(f"All Items: {[(i.pk, i.f) for i in all_items]}")
++    
++    # The original object should still have f=True
++    original = Item.objects.get(pk=pk)
++    print(f"Original object (pk={pk}): f={original.f}")
++    
++    # Test assertion
++    if original.f:
++        print("\nSUCCESS: Original object still has f=True (new object was created)")
++    else:
++        print("\nFAILURE: Original object was overwritten (f should be True but is False)")
++        sys.exit(1)
++
++
++if __name__ == '__main__':
++    test_reset_pk()
+\ No newline at end of file

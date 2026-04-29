@@ -1,0 +1,250 @@
+diff --git a/django/db/backends/mysql/operations.py b/django/db/backends/mysql/operations.py
+index 50f85e0621..de3aaa27be 100644
+--- a/django/db/backends/mysql/operations.py
++++ b/django/db/backends/mysql/operations.py
+@@ -69,8 +69,10 @@ class DatabaseOperations(BaseDatabaseOperations):
+             return "DATE(%s)" % (field_name)
+ 
+     def _convert_field_to_tz(self, field_name, tzname):
+-        if settings.USE_TZ:
+-            field_name = "CONVERT_TZ(%s, 'UTC', '%s')" % (field_name, tzname)
++        if settings.USE_TZ and tzname:
++            db_timezone = self.connection.timezone_name
++            if db_timezone != tzname:
++                field_name = "CONVERT_TZ(%s, '%s', '%s')" % (field_name, db_timezone, tzname)
+         return field_name
+ 
+     def datetime_cast_date_sql(self, field_name, tzname):
+diff --git a/django/db/backends/oracle/operations.py b/django/db/backends/oracle/operations.py
+index c1afb2ed5e..626c0757ce 100644
+--- a/django/db/backends/oracle/operations.py
++++ b/django/db/backends/oracle/operations.py
+@@ -97,11 +97,16 @@ END;
+     def _convert_field_to_tz(self, field_name, tzname):
+         if not settings.USE_TZ:
+             return field_name
++        if not tzname:
++            return field_name
+         if not self._tzname_re.match(tzname):
+             raise ValueError("Invalid time zone name: %s" % tzname)
+-        # Convert from UTC to local time, returning TIMESTAMP WITH TIME ZONE
+-        # and cast it back to TIMESTAMP to strip the TIME ZONE details.
+-        return "CAST((FROM_TZ(%s, '0:00') AT TIME ZONE '%s') AS TIMESTAMP)" % (field_name, tzname)
++        # Convert from the database's time zone to the specified time zone,
++        # returning TIMESTAMP WITH TIME ZONE and cast it back to TIMESTAMP to
++        # strip the TIME ZONE details.
++        if self.connection.timezone_name == tzname:
++            return field_name
++        return "CAST((FROM_TZ(%s, '%s') AT TIME ZONE '%s') AS TIMESTAMP)" % (field_name, self.connection.timezone_name, tzname)
+ 
+     def datetime_cast_date_sql(self, field_name, tzname):
+         field_name = self._convert_field_to_tz(field_name, tzname)
+diff --git a/django/db/backends/sqlite3/base.py b/django/db/backends/sqlite3/base.py
+index 6a19236c48..520e3aac9c 100644
+--- a/django/db/backends/sqlite3/base.py
++++ b/django/db/backends/sqlite3/base.py
+@@ -195,10 +195,10 @@ class DatabaseWrapper(BaseDatabaseWrapper):
+         conn = Database.connect(**conn_params)
+         conn.create_function("django_date_extract", 2, _sqlite_datetime_extract)
+         conn.create_function("django_date_trunc", 2, _sqlite_date_trunc)
+-        conn.create_function("django_datetime_cast_date", 2, _sqlite_datetime_cast_date)
+-        conn.create_function("django_datetime_cast_time", 2, _sqlite_datetime_cast_time)
+-        conn.create_function("django_datetime_extract", 3, _sqlite_datetime_extract)
+-        conn.create_function("django_datetime_trunc", 3, _sqlite_datetime_trunc)
++        conn.create_function("django_datetime_cast_date", 4, _sqlite_datetime_cast_date)
++        conn.create_function("django_datetime_cast_time", 4, _sqlite_datetime_cast_time)
++        conn.create_function("django_datetime_extract", 4, _sqlite_datetime_extract)
++        conn.create_function("django_datetime_trunc", 4, _sqlite_datetime_trunc)
+         conn.create_function("django_time_extract", 2, _sqlite_time_extract)
+         conn.create_function("django_time_trunc", 2, _sqlite_time_trunc)
+         conn.create_function("django_time_diff", 2, _sqlite_time_diff)
+@@ -410,6 +410,22 @@ def _sqlite_datetime_parse(dt, tzname=None):
+     return dt
+ 
+ 
++def _sqlite_datetime_cast_date(dt, db_zone, tzname):
++    if dt is None:
++        return None
++    try:
++        dt = backend_utils.typecast_timestamp(dt)
++    except (TypeError, ValueError):
++        return None
++    # Make the datetime aware using the database's timezone
++    if db_zone is not None:
++        dt = timezone.make_aware(dt, pytz.timezone(db_zone))
++    # Convert to target timezone if needed
++    if db_zone != tzname and tzname is not None:
++        dt = timezone.localtime(dt, pytz.timezone(tzname))
++    return dt.date().isoformat()
++
++
+ def _sqlite_date_trunc(lookup_type, dt):
+     dt = _sqlite_datetime_parse(dt)
+     if dt is None:
+diff --git a/django/db/backends/sqlite3/operations.py b/django/db/backends/sqlite3/operations.py
+index c4b02e5c60..ba7ed566e8 100644
+--- a/django/db/backends/sqlite3/operations.py
++++ b/django/db/backends/sqlite3/operations.py
+@@ -87,24 +87,30 @@ class DatabaseOperations(BaseDatabaseOperations):
+     def _convert_tzname_to_sql(self, tzname):
+         return "'%s'" % tzname if settings.USE_TZ else 'NULL'
+ 
++    def _convert_tznames_to_sql(self, tzname):
++        if settings.USE_TZ and tzname:
++            db_zone = self.connection.timezone_name
++            return "'%s', '%s'" % (db_zone, tzname)
++        return 'NULL, NULL'
++
+     def datetime_cast_date_sql(self, field_name, tzname):
+         return "django_datetime_cast_date(%s, %s)" % (
+-            field_name, self._convert_tzname_to_sql(tzname),
++            field_name, self._convert_tznames_to_sql(tzname),
+         )
+ 
+     def datetime_cast_time_sql(self, field_name, tzname):
+         return "django_datetime_cast_time(%s, %s)" % (
+-            field_name, self._convert_tzname_to_sql(tzname),
++            field_name, self._convert_tznames_to_sql(tzname),
+         )
+ 
+     def datetime_extract_sql(self, lookup_type, field_name, tzname):
+         return "django_datetime_extract('%s', %s, %s)" % (
+-            lookup_type.lower(), field_name, self._convert_tzname_to_sql(tzname),
++            lookup_type.lower(), field_name, self._convert_tznames_to_sql(tzname),
+         )
+ 
+     def datetime_trunc_sql(self, lookup_type, field_name, tzname):
+         return "django_datetime_trunc('%s', %s, %s)" % (
+-            lookup_type.lower(), field_name, self._convert_tzname_to_sql(tzname),
++            lookup_type.lower(), field_name, self._convert_tznames_to_sql(tzname),
+         )
+ 
+     def time_extract_sql(self, lookup_type, field_name):
+diff --git a/test_issue.py b/test_issue.py
+new file mode 100644
+index 0000000000..73dad0e066
+--- /dev/null
++++ b/test_issue.py
+@@ -0,0 +1,104 @@
++"""
++Test script to verify the TIME_ZONE issue in database backends.
++The issue is that the source timezone should be the database's TIME_ZONE setting,
++not 'UTC' when USE_TZ is True.
++"""
++import os
++import django
++os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'test_settings')
++
++# Create a minimal settings module
++with open('/testbed/test_settings.py', 'w') as f:
++    f.write('''
++import pytz
++SECRET_KEY = 'test'
++USE_TZ = True
++TIME_ZONE = 'Europe/Paris'
++DATABASES = {
++    'default': {
++        'ENGINE': 'django.db.backends.sqlite3',
++        'NAME': ':memory:',
++    }
++}
++''')
++
++django.setup()
++
++from django.conf import settings
++from django.db.backends.mysql.operations import DatabaseOperations as MySQLOps
++# from django.db.backends.sqlite3.operations import DatabaseOperations as SQLiteOps
++# from django.db.backends.oracle.operations import DatabaseOperations as OracleOps
++
++# Test MySQL operations
++print("=" * 50)
++print("Testing MySQL _convert_field_to_tz:")
++print("=" * 50)
++
++class MockConnection:
++    def __init__(self, tz_name):
++        self.settings_dict = {'TIME_ZONE': tz_name}
++    
++    @property
++    def timezone(self):
++        import pytz
++        from django.utils import timezone as tz
++        if self.settings_dict['TIME_ZONE'] is None:
++            return tz.utc
++        return pytz.timezone(self.settings_dict['TIME_ZONE'])
++    
++    @property
++    def timezone_name(self):
++        if self.settings_dict['TIME_ZONE'] is None:
++            return 'UTC'
++        return self.settings_dict['TIME_ZONE']
++
++# Test with MySQL - with no TIME_ZONE (defaults to UTC)
++conn_utc = MockConnection(None)
++ops = MySQLOps(conn_utc)
++result = ops._convert_field_to_tz('my_field', 'Europe/Paris')
++print(f"Database TIME_ZONE=None (UTC), Target=Europe/Paris:")
++print(f"  Result: {result}")
++print(f"  Expected: CONVERT_TZ(my_field, 'UTC', 'Europe/Paris')  [OK - source is UTC]")
++
++# Test with MySQL - with TIME_ZONE=Europe/Paris
++conn_paris = MockConnection('Europe/Paris')
++ops = MySQLOps(conn_paris)
++result = ops._convert_field_to_tz('my_field', 'Europe/Paris')
++print(f"Database TIME_ZONE=Europe/Paris, Target=Europe/Paris:")
++print(f"  Result: {result}")
++print(f"  Expected: my_field (no conversion needed if source==target)")
++print(f"  BUG: Currently uses 'UTC' as source instead of database timezone!")
++
++print()
++print("=" * 50)
++print("Testing Oracle _convert_field_to_tz:")
++print("=" * 50)
++
++# Test with Oracle 
++conn_utc = MockConnection(None)
++ops = OracleOps(conn_utc)
++result = ops._convert_field_to_tz('my_field', 'Europe/Paris')
++print(f"Database TIME_ZONE=None (UTC), Target=Europe/Paris:")
++print(f"  Result: {result}")
++print(f"  Expected: uses '0:00' (UTC) as source [OK]")
++
++conn_paris = MockConnection('Europe/Paris')
++ops = OracleOps(conn_paris)
++result = ops._convert_field_to_tz('my_field', 'Europe/Paris')
++print(f"Database TIME_ZONE=Europe/Paris, Target=Europe/Paris:")
++print(f"  Result: {result}")
++print(f"  Expected: my_field (no conversion needed)")
++print(f"  BUG: Currently uses '0:00' (UTC) as source instead of database timezone!")
++
++print()
++print("=" * 50)
++print("Summary:")
++print("=" * 50)
++print("The issue is that all database backends use 'UTC' (or '0:00' for Oracle)")
++print("as the source timezone when converting datetime fields, but according")
++print("to Django docs, when TIME_ZONE is set in DATABASES, the datetimes should be")
++print("stored in that timezone, not UTC.")
++print("")
++print("The fix should:")
++print("1. Use connection.timezone_name as the source timezone")
++print("2. Only convert if source != target")
+\ No newline at end of file
+diff --git a/test_settings.py b/test_settings.py
+new file mode 100644
+index 0000000000..fc9cb18350
+--- /dev/null
++++ b/test_settings.py
+@@ -0,0 +1,11 @@
++
++import pytz
++SECRET_KEY = 'test'
++USE_TZ = True
++TIME_ZONE = 'Europe/Paris'
++DATABASES = {
++    'default': {
++        'ENGINE': 'django.db.backends.sqlite3',
++        'NAME': ':memory:',
++    }
++}

@@ -1,0 +1,120 @@
+diff --git a/reproduce_issue.py b/reproduce_issue.py
+new file mode 100644
+index 0000000000..adcbbfddc1
+--- /dev/null
++++ b/reproduce_issue.py
+@@ -0,0 +1,93 @@
++#!/usr/bin/env python
++"""
++Reproduction script for issue:
++Union queryset with ordering breaks on ordering with derived querysets
++"""
++import os
++import sys
++import django
++
++# Set up Django settings
++os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'test_settings')
++
++# Create a minimal settings module
++with open('/testbed/test_settings.py', 'w') as f:
++    f.write("""
++DATABASES = {
++    'default': {
++        'ENGINE': 'django.db.backends.sqlite3',
++        'NAME': ':memory:',
++    }
++}
++INSTALLED_APPS = [
++    'django.contrib.contenttypes',
++    'django.contrib.auth',
++]
++SECRET_KEY = 'test-secret-key'
++DEFAULT_AUTO_FIELD = 'django.db.models.AutoField'
++USE_TZ = True
++""")
++
++sys.path.insert(0, '/testbed')
++django.setup()
++
++# Now let's create test models and test the issue
++from django.db import models, connection
++from django.db.models import QuerySet, F
++
++# Create tables
++with connection.schema_editor() as schema_editor:
++    # Create a simple test model
++    class Dimension(models.Model):
++        name = models.CharField(max_length=100)
++        order = models.IntegerField(default=0)
++        
++        class Meta:
++            app_label = 'test_app'
++    
++    schema_editor.create_model(Dimension)
++
++# Create some test data
++Dimension.objects.create(name='a', order=1)
++Dimension.objects.create(name='b', order=2)
++Dimension.objects.create(name='c', order=3)
++Dimension.objects.create(name='d', order=4)
++Dimension.objects.create(name='e', order=5)
++
++print("Testing union queryset with ordering...")
++
++# Create a union query with ORDER BY - exactly as described in issue
++# NOTE: Do NOT evaluate qs before creating derived!
++qs = (
++    Dimension.objects.filter(pk__in=[1, 2])
++    .union(Dimension.objects.filter(pk__in=[4, 5]))
++    .order_by('order')
++)
++
++print(f"\n=== After creating union with order_by ===")
++print(f"qs.query = id={id(qs.query)}")
++print(f"qs.query.order_by = {qs.query.order_by}")
++print(f"qs.query.combinator = {qs.query.combinator}")
++
++# Skip first evaluation - go directly to creating derived from qs
++# Now let's create a DERIVED queryset and evaluate it  
++# The key difference: use .values_list() to change the select columns
++print("\n=== Creating derived queryset .values_list('pk', flat=True) ===")
++derived = qs.values_list('pk', flat=True)
++print(f"derived.query = id={id(derived.query)}")
++print(f"derived.query.order_by = {derived.query.order_by}")
++print(f"derived.query.values_select = {derived.query.values_select}")
++
++print("\n=== Evaluating derived queryset ===")
++derived_result = list(derived)
++print(f"Derived result: {derived_result}")
++
++# Now try to re-evaluate ORIGINAL queryset - WITHOUT first evaluation!
++print("\n=== Re-evaluating ORIGINAL queryset (should fail) ===")
++try:
++    result = list(qs)
++    print(f"Success: {result}")
++except Exception as e:
++    print(f"ERROR: {e}")
++    import traceback
++    traceback.print_exc()
+\ No newline at end of file
+diff --git a/test_settings.py b/test_settings.py
+new file mode 100644
+index 0000000000..15b877a460
+--- /dev/null
++++ b/test_settings.py
+@@ -0,0 +1,14 @@
++
++DATABASES = {
++    'default': {
++        'ENGINE': 'django.db.backends.sqlite3',
++        'NAME': ':memory:',
++    }
++}
++INSTALLED_APPS = [
++    'django.contrib.contenttypes',
++    'django.contrib.auth',
++]
++SECRET_KEY = 'test-secret-key'
++DEFAULT_AUTO_FIELD = 'django.db.models.AutoField'
++USE_TZ = True

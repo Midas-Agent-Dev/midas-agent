@@ -112,9 +112,19 @@ midas infer --dag config.yaml
 
 ## Evaluation
 
-> Work in progress — only 20 of 500 SWE-bench Verified issues tested so far.
+> Work in progress — 79 of 500 SWE-bench Verified issues tested so far (training run ongoing).
 
-### Head-to-Head: Midas Agent vs SWE-agent v1.1.0
+### Pass Rate (79 issues)
+
+| Repo | Passed | Total | Rate |
+|------|--------|-------|------|
+| astropy | 12 | 22 | 55% |
+| django | 40 | 57 | 70% |
+| **Overall** | **52** | **79** | **66%** |
+
+Model: MiniMax-M2.5 with 1.5M token budget per issue. 5-step DAG (localize → reproduce → implement → validate_targeted → validate_broad). No lessons were injected — all 59 new episodes were blocked by the similarity threshold (0.50), confirming that the DAG structure is the primary driver of performance.
+
+### Head-to-Head: Midas Agent vs SWE-agent v1.1.0 (20-issue subset)
 
 Same model (MiniMax-M2.5), same 20 SWE-bench Verified issues (astropy subset). Midas Agent uses its trained 5-step DAG with a 1.5M token budget per issue. SWE-agent v1.1.0 uses its default config (function calling, anthropic-style file map, review-on-submit) with a 100-call limit per issue.
 
@@ -155,9 +165,10 @@ Both agents share 11 common solves. Midas uniquely solves 14369, while every iss
 
 ### Remarks
 
-- **Lesson retrieval does not necessarily improve results.** In the 20-issue training run, only 1 of 6 injected lessons clearly helped the agent (ep18: "check types before conversion" guided a None-check fix). Most solves (9/12) happened without any lesson. The similarity threshold (0.50) correctly blocked injection in 14/20 episodes, but importance voting suffers from false-positive upvotes when an irrelevant lesson is present during an independent solve. Self-retrieval of lessons on the same issue set is not meaningful — lessons need to be tested on *unseen* issues to measure real generalization.
-- **The DAG structure is the primary contributor to performance**, not lesson retrieval. The 5-step workflow (localize → reproduce → implement → validate_targeted → validate_broad) enforces a disciplined approach that prevents the agent from burning tokens on unfocused exploration.
-- **Further tests are being planned.** We intend to evaluate on the full 500-issue SWE-bench Verified set, test lesson transfer across different repositories (not just astropy), and compare with additional baselines and models.
+- **Lesson retrieval has had zero impact so far.** Across 79 episodes, the similarity threshold (0.50) blocked lesson injection in 73 of 79 episodes. In the original 20 astropy episodes, 6 lessons were injected but only 1 clearly helped. In the 59 new episodes (astropy + django), zero lessons were injected — the highest similarity was 0.50 (just below threshold). The lesson library grew to 26 entries but issue-description similarity is too coarse to find matches across diverse issues.
+- **The DAG structure is the primary contributor to performance**, not lesson retrieval. The 5-step workflow (localize → reproduce → implement → validate_targeted → validate_broad) enforces a disciplined approach that prevents the agent from burning tokens on unfocused exploration. All 52 solves happened without lesson assistance.
+- **Django issues are significantly easier than astropy.** Django pass rate (70%) vs astropy (55%) reflects the global SWE-bench difficulty distribution — most failed astropy issues have <10% global solve rates, while failed django issues are in the 20-40% range.
+- **Further tests are being planned.** We intend to complete the 100-issue run, test lesson transfer with a lowered threshold (0.30), evaluate on the full 500-issue set, and compare with stronger models.
 
 ### Training Episode Details
 
@@ -193,7 +204,7 @@ The DAG config and lesson library from this run are stored in `artifacts/`:
 ```
 artifacts/
 ├── dag.yaml           # 5-step DAG workflow
-└── lessons.json       # 8 lessons with correct_approach
+└── lessons.json       # 26 lessons with correct_approach (growing)
 ```
 
 ## Training Output

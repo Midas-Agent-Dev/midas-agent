@@ -1,0 +1,188 @@
+diff --git a/django/db/models/deletion.py b/django/db/models/deletion.py
+index 3a462f1c4c..949ef673f7 100644
+--- a/django/db/models/deletion.py
++++ b/django/db/models/deletion.py
+@@ -85,6 +85,11 @@ class Collector:
+ 
+         Return a list of all objects that were not already collected.
+         """
++        # If objs is a QuerySet, optimize to only fetch the pk field.
++        # This avoids fetching unnecessary fields when collecting objects
++        # for deletion.
++        if hasattr(objs, 'model') and hasattr(objs, 'query'):
++            objs = objs.only('pk')
+         if not objs:
+             return []
+         new_objs = []
+@@ -232,9 +237,10 @@ class Collector:
+         """
+         Get a QuerySet of objects related to `objs` via the relation `related`.
+         """
+-        return related.related_model._base_manager.using(self.using).filter(
++        qs = related.related_model._base_manager.using(self.using).filter(
+             **{"%s__in" % related.field.name: objs}
+         )
++        return qs.only('pk')
+ 
+     def instances_with_model(self):
+         for model, instances in self.data.items():
+diff --git a/test_delete_debug.py b/test_delete_debug.py
+new file mode 100644
+index 0000000000..619191cc73
+--- /dev/null
++++ b/test_delete_debug.py
+@@ -0,0 +1,69 @@
++"""
++Debug test: Capture SQL before constraint fails
++"""
++import os
++import django
++from django.conf import settings
++
++settings.configure(
++    DATABASES={
++        'default': {
++            'ENGINE': 'django.db.backends.sqlite3',
++            'NAME': ':memory:',
++        }
++    },
++    INSTALLED_APPS=[
++        'django.contrib.contenttypes',
++        'django.contrib.auth',
++    ],
++    USE_TZ=True,
++)
++django.setup()
++
++from django.db import models, connection
++from django.test.utils import CaptureQueriesContext
++
++class Parent(models.Model):
++    name = models.CharField(max_length=100)
++    
++    class Meta:
++        app_label = 'test_app'
++
++class Child(models.Model):
++    parent = models.ForeignKey(Parent, on_delete=models.CASCADE)
++    name = models.CharField(max_length=100)
++    problematic_data = models.TextField(default='')
++    
++    class Meta:
++        app_label = 'test_app'
++
++# Create tables
++with connection.schema_editor() as schema_editor:
++    schema_editor.create_model(Parent)
++    schema_editor.create_model(Child)
++
++# Create test data (need to add children AFTER parent to avoid constraint issues)
++parent = Parent.objects.create(name='Test Parent')
++# Set foreign key in SQL directly
++connection.cursor().execute("INSERT INTO test_app_child (parent_id, name, problematic_data) VALUES (?, ?, ?)", 
++                         [parent.pk, 'Child 1', 'x' * 1000])
++connection.cursor().execute("INSERT INTO test_app_child (parent_id, name, problematic_data) VALUES (?, ?, ?)", 
++                         [parent.pk, 'Child 2', 'y' * 1000])
++
++print("Created parent:", parent.pk)
++
++# Delete PARENT - this should cascade to children
++print("\n--- Delete Parent (cascade to children) ---")
++
++# Don't use context manager as we want to catch queries but continue
++import logging
++logger = logging.getLogger('django.db.backends')
++logger.setLevel(logging.DEBUG)
++handler = logging.StreamHandler()
++handler.setLevel(logging.DEBUG)
++logger.addHandler(handler)
++
++try:
++    Parent.objects.filter(pk=parent.pk).delete()
++except:
++    print("Delete failed as expected")
+diff --git a/test_delete_issue.py b/test_delete_issue.py
+new file mode 100644
+index 0000000000..12c02558df
+--- /dev/null
++++ b/test_delete_issue.py
+@@ -0,0 +1,79 @@
++"""
++Test to verify the issue: delete() fetches ALL fields from related tables 
++when only primary keys are needed.
++"""
++import os
++import django
++from django.conf import settings
++
++# Configure minimal settings
++settings.configure(
++    DATABASES={
++        'default': {
++            'ENGINE': 'django.db.backends.sqlite3',
++            'NAME': ':memory:',
++        }
++    },
++    INSTALLED_APPS=[
++        'django.contrib.contenttypes',
++        'django.contrib.auth',
++    ],
++    USE_TZ=True,
++)
++django.setup()
++
++from django.db import models, connection
++from django.db.models.deletion import Collector
++from django.db.models import signals
++
++# Create test models
++class Parent(models.Model):
++    name = models.CharField(max_length=100)
++    
++    class Meta:
++        app_label = 'test_app'
++
++class Child(models.Model):
++    parent = models.ForeignKey(Parent, on_delete=models.CASCADE)
++    name = models.CharField(max_length=100)
++    # This field would cause issues in real scenario
++    problematic_data = models.TextField(default='')
++    
++    class Meta:
++        app_label = 'test_app'
++
++# Register a signal listener to disable fast delete
++def pre_delete_listener(**kwargs):
++    pass
++
++signals.pre_delete.connect(pre_delete_listener, sender=Child)
++
++# Create tables
++with connection.schema_editor() as schema_editor:
++    schema_editor.create_model(Parent)
++    schema_editor.create_model(Child)
++
++# Create test data
++parent = Parent.objects.create(name='Test Parent')
++child1 = Child.objects.create(parent=parent, name='Child 1', problematic_data='x' * 1000)
++child2 = Child.objects.create(parent=parent, name='Child 2', problematic_data='y' * 1000)
++
++print("Created parent:", parent.pk)
++print("Created children:", child1.pk, child2.pk)
++
++# Now trace what SQL is generated during delete
++from django.test.utils import CaptureQueriesContext
++
++# Delete children - this will NOT use fast delete due to signal listener
++with CaptureQueriesContext(connection) as context:
++    Child.objects.filter(parent=parent).delete()
++
++print("\nSQL queries executed during delete:")
++for i, query in enumerate(context.captured_queries, 1):
++    sql = query['sql']
++    # Show first 200 chars of each query
++    print(f"{i}. {sql[:200]}")
++    if 'SELECT' in sql.upper() and 'problematic_data' in sql:
++        print("   ^^^ PROBLEM: This selects problematic_data field which is not needed!")
++
++print("\nExpected: delete() should only need to select the primary key, not all fields")

@@ -1,0 +1,68 @@
+diff --git a/django/db/models/fields/__init__.py b/django/db/models/fields/__init__.py
+index d610dc86f0..927dd39180 100644
+--- a/django/db/models/fields/__init__.py
++++ b/django/db/models/fields/__init__.py
+@@ -2,6 +2,7 @@ import collections.abc
+ import copy
+ import datetime
+ import decimal
++import enum
+ import operator
+ import uuid
+ import warnings
+@@ -792,6 +793,8 @@ class Field(RegisterLookupMixin):
+         """Perform preliminary non-db specific value checks and conversions."""
+         if isinstance(value, Promise):
+             value = value._proxy____cast()
++        elif isinstance(value, enum.Enum):
++            value = value.value
+         return value
+ 
+     def get_db_prep_value(self, value, connection, prepared=False):
+@@ -1008,7 +1011,11 @@ class CharField(Field):
+         return "CharField"
+ 
+     def to_python(self, value):
+-        if isinstance(value, str) or value is None:
++        if value is None:
++            return value
++        if isinstance(value, enum.Enum):
++            value = value.value
++        if isinstance(value, str):
+             return value
+         return str(value)
+ 
+@@ -1769,6 +1776,8 @@ class IntegerField(Field):
+     def to_python(self, value):
+         if value is None:
+             return value
++        if isinstance(value, enum.Enum):
++            value = value.value
+         try:
+             return int(value)
+         except (TypeError, ValueError):
+diff --git a/django/db/models/query_utils.py b/django/db/models/query_utils.py
+index 189fb4fa44..c938781f4c 100644
+--- a/django/db/models/query_utils.py
++++ b/django/db/models/query_utils.py
+@@ -6,6 +6,7 @@ large and/or so that they can be used by other modules without getting into
+ circular import difficulties.
+ """
+ import copy
++import enum
+ import functools
+ import inspect
+ from collections import namedtuple
+@@ -150,6 +151,12 @@ class DeferredAttribute:
+             return getattr(instance, link_field.attname)
+         return None
+ 
++    def __set__(self, instance, value):
++        # Convert enum values to their underlying values
++        if isinstance(value, enum.Enum):
++            value = value.value
++        instance.__dict__[self.field.attname] = value
++
+ 
+ class RegisterLookupMixin:
+ 
